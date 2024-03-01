@@ -96,14 +96,6 @@ class BazelVendorTest(test_base.TestBase):
     self.assertIn('@bbb~.marker', repos_vendored)
     self.assertIn('.vendorignore', repos_vendored)
 
-  def testVendorFailsWithNofetch(self):
-    self.ScratchFile('MODULE.bazel')
-    self.ScratchFile('BUILD')
-    _, _, stderr = self.RunBazel(
-        ['vendor', '--vendor_dir=vendor', '--nofetch'], allow_failure=True
-    )
-    self.assertIn('ERROR: You cannot run vendor with --nofetch', stderr)
-
   def testVendoringMultipleTimes(self):
     self.main_registry.createCcModule('aaa', '1.0')
     self.ScratchFile(
@@ -495,6 +487,70 @@ class BazelVendorTest(test_base.TestBase):
         'Target @@_main~ext~venRepo//:lala up-to-date (nothing to build)',
         stderr,
     )
+
+  def testBasicVendorTarget(self):
+    self.main_registry.createCcModule('aaa', '1.0').createCcModule(
+      'bbb', '1.0')
+    self.ScratchFile(
+      'MODULE.bazel',
+      [
+        'bazel_dep(name = "aaa", version = "1.0")',
+        'bazel_dep(name = "bbb", version = "1.0")',
+      ],
+    )
+    self.ScratchFile('BUILD')
+
+    self.RunBazel(['vendor', '@aaa//:lib_aaa', '@bbb//:lib_bbb',
+                   '--vendor_dir=vendor'])
+    # Assert aaa & bbb and are vendored
+    self.assertIn('aaa~', os.listdir(self._test_cwd + '/vendor'))
+    self.assertIn('bbb~', os.listdir(self._test_cwd + '/vendor'))
+
+  def testVendorTarget(self):
+    self.main_registry.createCcModule('aaa', '1.0').createCcModule(
+      'bbb', '1.0', {'aaa': '1.0'})
+    self.ScratchFile(
+      'MODULE.bazel',
+      [
+        'bazel_dep(name = "bbb", version = "1.0")',
+      ],
+    )
+    self.ScratchFile(
+      'BUILD',
+      [
+        'cc_binary(',
+        '  name = "main",',
+        '  srcs = ["main.cc"],',
+        '  deps = [',
+        '    "@bbb//:lib_bbb",',
+        '  ],',
+        ')',
+      ],
+    )
+    self.ScratchFile(
+      'main.cc',
+      [
+        '#include "aaa.h"',
+        'int main() {',
+        '    hello_aaa("Hello there!");',
+        '}',
+      ],
+    )
+
+    self.RunBazel(['vendor', '//:main', '--vendor_dir=vendor'])
+
+    # Clean and Assert running the target doesn't cause any repo fetch, but
+    # only symlinks, meaning it is using what is under /vendor directory
+    self.RunBazel(['clean', '--expunge'])
+    _, stdout, _ = self.RunBazel(['run', '//:main', '--vendor_dir=vendor'])
+    self.assertIn('Hello there! => aaa@1.0', stdout)
+
+    _, stdout, _ = self.RunBazel(['info', 'output_base'])
+    repo_path = stdout[0] + '/external/aaa~'
+    if self.IsWindows():
+      self.assertTrue(self.IsJunction(repo_path))
+    else:
+      self.assertTrue(os.path.islink(repo_path))
 
 
 if __name__ == '__main__':

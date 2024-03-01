@@ -28,6 +28,7 @@ import java.util.List;
 /** Fetches all repos needed for building a given set of targets. */
 public class TargetFetcher {
   private final CommandEnvironment env;
+  private static final List<Label> collectedLabels = new ArrayList<>();
 
   private TargetFetcher(CommandEnvironment env) {
     this.env = env;
@@ -38,6 +39,25 @@ public class TargetFetcher {
       CommandEnvironment env, OptionsParsingResult options, List<String> targets)
       throws TargetFetcherException {
     new TargetFetcher(env).fetchTargets(options, targets);
+  }
+
+  /** Evaluate the targets then collects their fetched repos*/
+  public static List<String> fetchAndCollectTargetRepos(
+      CommandEnvironment env, OptionsParsingResult options, List<String> targets)
+      throws RepositoryMappingResolutionException, InterruptedException, TargetFetcherException {
+    new TargetFetcher(env).fetchTargets(options, targets);
+    Set<String> collectedRepos = new HashSet<>();
+    for (Label label : collectedLabels) {
+      try {
+        RepositoryName repoName = RepositoryName.create(label.getRepoName());
+        if (!repoName.isMain()) {
+          collectedRepos.add(repoName.getCanonicalForm());
+        }
+      } catch (LabelSyntaxException | EvalException e) {
+        throw new TargetFetcherException("Invalid repo name: " + e.getMessage());
+      }
+    }
+    return collectedRepos.stream().collect(Collectors.toList());
   }
 
   private void fetchTargets(OptionsParsingResult options, List<String> targets)
