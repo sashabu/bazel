@@ -238,7 +238,7 @@ public final class VendorCommand implements BlazeCommand {
       throws InterruptedException, IOException{
     List<String> targetRepos;
     try {
-      // This only follect transitive dependencies, not all what we need to build ex:toolchains
+      // This only collect transitive dependencies, not all what we need to build ex:toolchains
       // TODO Try collecting repos via delegatorfunction events & vendor module?
       targetRepos = TargetFetcher.fetchAndCollectTargetRepos(env, options, targets);
       env.getReporter().handle(
@@ -251,10 +251,7 @@ public final class VendorCommand implements BlazeCommand {
           env.getReporter(), e.getMessage(), e.getDetailedExitCode());
     }
 
-    vendorRepos(env, options.getOptions(LoadingPhaseThreadsOption.class), targetRepos, vendorDirectory);
-    env.getReporter().handle(
-        Event.info("All external dependencies for these targets vendored successfully."));
-    return BlazeCommandResult.success();
+    return vendorRepos(env, options.getOptions(LoadingPhaseThreadsOption.class), targetRepos, vendorDirectory);
   }
 
   /**
