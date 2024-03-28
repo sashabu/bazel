@@ -14,10 +14,12 @@
 
 package com.google.devtools.build.lib.cmdline;
 
+import static com.google.common.base.Throwables.throwIfInstanceOf;
+import static com.google.common.base.Throwables.throwIfUnchecked;
+
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.LoadingCache;
 import com.google.common.base.Preconditions;
-import com.google.common.base.Throwables;
 import com.google.devtools.build.lib.skyframe.serialization.autocodec.SerializationConstant;
 import com.google.devtools.build.lib.util.Pair;
 import com.google.devtools.build.lib.util.StringCanonicalizer;
@@ -74,7 +76,8 @@ public final class RepositoryName {
     try {
       return repositoryNameCache.get(name);
     } catch (CompletionException e) {
-      Throwables.propagateIfPossible(e.getCause(), LabelSyntaxException.class);
+      throwIfInstanceOf(e.getCause(), LabelSyntaxException.class);
+      throwIfUnchecked(e.getCause());
       throw e;
     }
   }
@@ -247,24 +250,19 @@ public final class RepositoryName {
    *       <dt><code>@protobuf</code>
    *       <dd>if this repository is a WORKSPACE dependency and its <code>name</code> is "protobuf",
    *           or if this repository is a Bzlmod dependency of the main module and its apparent name
-   *           is "protobuf" (in both cases only if mainRepositoryMapping is not null)
+   *           is "protobuf"
    *       <dt><code>@@protobuf~3.19.2</code>
    *       <dd>only with Bzlmod, if this a repository that is not visible from the main module
    */
-  public String getDisplayForm(@Nullable RepositoryMapping mainRepositoryMapping) {
+  public String getDisplayForm(RepositoryMapping mainRepositoryMapping) {
     Preconditions.checkArgument(
-        mainRepositoryMapping == null
-            || mainRepositoryMapping.ownerRepo() == null
-            || mainRepositoryMapping.ownerRepo().isMain());
+        mainRepositoryMapping.ownerRepo() == null || mainRepositoryMapping.ownerRepo().isMain());
     if (!isVisible()) {
       return getNameWithAt();
     }
     if (isMain()) {
       // Packages in the main repository can always use repo-relative form.
       return "";
-    }
-    if (mainRepositoryMapping == null) {
-      return getNameWithAt();
     }
     if (!mainRepositoryMapping.usesStrictDeps()) {
       // If the main repository mapping is not using strict visibility, then Bzlmod is certainly

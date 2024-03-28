@@ -23,8 +23,11 @@ import com.google.devtools.build.lib.packages.Info;
 import com.google.devtools.build.lib.packages.RuleClass.ConfiguredTargetFactory.RuleErrorException;
 import com.google.devtools.build.lib.rules.java.JavaCompilationArgsProvider;
 import com.google.devtools.build.lib.rules.java.JavaInfo;
+import com.google.devtools.build.lib.starlarkbuildapi.android.AndroidIdeInfoProviderApi;
+import com.google.devtools.build.lib.starlarkbuildapi.android.AndroidSdkProviderApi;
 import com.google.devtools.build.lib.starlarkbuildapi.android.AndroidSplitTransitionApi;
 import com.google.devtools.build.lib.starlarkbuildapi.android.AndroidStarlarkCommonApi;
+import net.starlark.java.annot.StarlarkMethod;
 import net.starlark.java.eval.EvalException;
 import net.starlark.java.eval.Sequence;
 import net.starlark.java.eval.StarlarkInt;
@@ -96,5 +99,15 @@ public class AndroidStarlarkCommon
         Sequence.cast(dexopts, String.class, "dexopts"),
         dexmerger,
         minSdkVersion.toInt("min_sdk_version"));
+  }
+
+  @StarlarkMethod(name = AndroidIdeInfoProviderApi.NAME, structField = true, documented = false)
+  public AndroidIdeInfoProvider.Provider getAndroidIdeInfoProvider() {
+    return AndroidIdeInfoProvider.PROVIDER;
+  }
+
+  @StarlarkMethod(name = AndroidSdkProviderApi.NAME, structField = true, documented = false)
+  public AndroidSdkProvider.Provider getAndroidSdkInfoProvider() {
+    return AndroidSdkProvider.PROVIDER;
   }
 }

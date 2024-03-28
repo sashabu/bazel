@@ -436,9 +436,8 @@ public class BuildConfigurationValue
   /**
    * Returns the testlogs directory for this build configuration.
    *
-   * @deprecated Use {@code RuleContext#getTestLogsDirectory} instead whenever possible.
+   * <p>Use {@code RuleContext#getTestLogsDirectory} instead whenever possible.
    */
-  @Deprecated
   public ArtifactRoot getTestLogsDirectory(RepositoryName repositoryName) {
     return outputDirectories.getTestLogsDirectory(repositoryName);
   }
@@ -629,6 +628,11 @@ public class BuildConfigurationValue
   /** Returns a configuration fragment instances of the given class. */
   public <T extends Fragment> T getFragment(Class<T> clazz) {
     return clazz.cast(fragments.get(clazz));
+  }
+
+  /** Return all the configuration fragments. */
+  public ImmutableSortedMap<Class<? extends Fragment>, Fragment> getFragments() {
+    return fragments;
   }
 
   /** Returns true if the requested configuration fragment is present. */
@@ -831,12 +835,6 @@ public class BuildConfigurationValue
     return options.cpu;
   }
 
-  @Override
-  public String getCpuForStarlark(StarlarkThread thread) throws EvalException {
-    BuiltinRestriction.failIfCalledOutsideBuiltins(thread);
-    return getCpu();
-  }
-
   @VisibleForTesting
   public String getHostCpu() {
     return options.hostCpu;
@@ -845,8 +843,8 @@ public class BuildConfigurationValue
   /**
    * Describes how to create runfile symlink trees.
    *
-   * <p>May be overridden if an {@link OutputService} capable of creating symlink trees is
-   * available.
+   * <p>May be overridden if an {@link com.google.devtools.build.lib.vfs.OutputService} capable of
+   * creating symlink trees is available.
    */
   public enum RunfileSymlinksMode {
     /** Do not create. */

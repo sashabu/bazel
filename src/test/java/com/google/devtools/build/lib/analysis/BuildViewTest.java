@@ -43,6 +43,7 @@ import com.google.devtools.build.lib.packages.Type.ConversionException;
 import com.google.devtools.build.lib.pkgcache.LoadingFailureEvent;
 import com.google.devtools.build.lib.skyframe.ActionLookupConflictFindingFunction;
 import com.google.devtools.build.lib.skyframe.ConfiguredTargetAndData;
+import com.google.devtools.build.lib.testutil.TestConstants;
 import com.google.devtools.build.lib.testutil.TestConstants.InternalTestExecutionMode;
 import com.google.devtools.build.lib.util.Pair;
 import com.google.devtools.build.lib.vfs.Path;
@@ -964,7 +965,7 @@ public class BuildViewTest extends BuildViewTestBase {
       // TODO(b/67651960): fix or justify disabling.
       return;
     }
-    useConfiguration("--cpu=k8");
+    useConfiguration("--platforms=" + TestConstants.PLATFORM_LABEL);
     reporter.removeHandler(failFastHandler); // Expect errors from action conflicts.
     scratch.file(
         "conflict/BUILD",
@@ -1093,10 +1094,8 @@ public class BuildViewTest extends BuildViewTestBase {
 
   @Test
   public void testVisibilityReferencesNonexistentPackage() throws Exception {
-    scratch.file("z/a/BUILD",
-        "py_library(name='a', visibility=['//nonexistent:nothing'])");
-    scratch.file("z/b/BUILD",
-        "py_library(name='b', deps=['//z/a:a'])");
+    scratch.file("z/a/BUILD", "filegroup(name='a', visibility=['//nonexistent:nothing'])");
+    scratch.file("z/b/BUILD", "filegroup(name='b', srcs=['//z/a:a'])");
     reporter.removeHandler(failFastHandler);
     assertThrows(ViewCreationFailedException.class, () -> update("//z/b:b"));
     assertContainsEvent("no such package 'nonexistent'");
@@ -1105,11 +1104,8 @@ public class BuildViewTest extends BuildViewTestBase {
   // regression test ("java.lang.IllegalStateException: cannot happen")
   @Test
   public void testDefaultVisibilityInNonexistentPackage() throws Exception {
-    scratch.file("z/a/BUILD",
-        "package(default_visibility=['//b'])",
-        "py_library(name='alib')");
-    scratch.file("z/b/BUILD",
-        "py_library(name='b', deps=['//z/a:alib'])");
+    scratch.file("z/a/BUILD", "package(default_visibility=['//b'])", "filegroup(name='alib')");
+    scratch.file("z/b/BUILD", "filegroup(name='b', srcs=['//z/a:alib'])");
     reporter.removeHandler(failFastHandler);
     assertThrows(ViewCreationFailedException.class, () -> update("//z/b:b"));
     assertContainsEvent("no such package 'b'");
@@ -1242,8 +1238,7 @@ public class BuildViewTest extends BuildViewTestBase {
   @Test
   public void testErrorMessageForMissingPackageGroup() throws Exception {
     scratch.file(
-        "apple/BUILD",
-        "py_library(name='apple', visibility=['//non:existent'])");
+        "apple/BUILD", "filegroup(name='apple', srcs=['x.txt'], visibility=['//non:existent'])");
     reporter.removeHandler(failFastHandler);
     assertThrows(ViewCreationFailedException.class, () -> update("//apple"));
     assertDoesNotContainEvent("implicitly depends upon");

@@ -37,16 +37,16 @@ public class ObjectCodecs {
   private static final int DEFAULT_OUTPUT_CAPACITY = 32;
 
   private final ImmutableSerializationContext serializationContext;
-  private final DeserializationContext deserializationContext;
+  private final ImmutableDeserializationContext deserializationContext;
 
   /**
-   * Creates an instance using the supplied {@link ObjectCodecRegistry} for looking up {@link
+   * Creates an instance using the supplied {@code ObjectCodecRegistry} for looking up {@link
    * ObjectCodec}s.
    */
   public ObjectCodecs(
       ObjectCodecRegistry codecRegistry, ImmutableClassToInstanceMap<Object> dependencies) {
     serializationContext = new ImmutableSerializationContext(codecRegistry, dependencies);
-    deserializationContext = new DeserializationContext(codecRegistry, dependencies);
+    deserializationContext = new ImmutableDeserializationContext(codecRegistry, dependencies);
   }
 
   public ObjectCodecs(ObjectCodecRegistry codecRegistry) {
@@ -77,8 +77,10 @@ public class ObjectCodecs {
   }
 
   @VisibleForTesting // private
-  public SharedValueSerializationContext getSharedValueSerializationContextForTesting() {
-    return SharedValueSerializationContext.createForTesting(getCodecRegistry(), getDependencies());
+  public SharedValueSerializationContext getSharedValueSerializationContextForTesting(
+      FingerprintValueService fingerprintValueService) {
+    return SharedValueSerializationContext.createForTesting(
+        getCodecRegistry(), getDependencies(), fingerprintValueService);
   }
 
   @VisibleForTesting // private
@@ -87,8 +89,21 @@ public class ObjectCodecs {
         getCodecRegistry(), overrideDependencies(getDependencies(), dependencyOverrides));
   }
 
-  public DeserializationContext getDeserializationContext() {
+  @VisibleForTesting // private
+  public ImmutableDeserializationContext getDeserializationContextForTesting() {
     return deserializationContext;
+  }
+
+  @VisibleForTesting // private
+  public MemoizingDeserializationContext getMemoizingDeserializationContextForTesting() {
+    return MemoizingDeserializationContext.createForTesting(getCodecRegistry(), getDependencies());
+  }
+
+  @VisibleForTesting // private
+  public SharedValueDeserializationContext getSharedValueDeserializationContextForTesting(
+      FingerprintValueService fingerprintValueService) {
+    return SharedValueDeserializationContext.createForTesting(
+        getCodecRegistry(), getDependencies(), fingerprintValueService);
   }
 
   /**
@@ -140,10 +155,11 @@ public class ObjectCodecs {
   }
 
   /** Serializes {@code subject} using a {@link SharedValueSerializationContext}. */
-  public SerializationResult<ByteString> serializeMemoizedAndBlocking(Object subject)
+  public SerializationResult<ByteString> serializeMemoizedAndBlocking(
+      FingerprintValueService fingerprintValueService, Object subject)
       throws SerializationException {
     return SharedValueSerializationContext.serializeToResult(
-        getCodecRegistry(), getDependencies(), subject);
+        getCodecRegistry(), getDependencies(), fingerprintValueService, subject);
   }
 
   /**
@@ -152,12 +168,59 @@ public class ObjectCodecs {
    * @param dependencyOverrides dependencies to override, see {@link #overrideDependencies}
    */
   public SerializationResult<ByteString> serializeMemoizedAndBlocking(
-      Object subject, ClassToInstanceMap<?> dependencyOverrides) throws SerializationException {
+      FingerprintValueService fingerprintValueService,
+      Object subject,
+      ImmutableClassToInstanceMap<?> dependencyOverrides)
+      throws SerializationException {
     return SharedValueSerializationContext.serializeToResult(
-        getCodecRegistry(), overrideDependencies(getDependencies(), dependencyOverrides), subject);
+        getCodecRegistry(),
+        overrideDependencies(getDependencies(), dependencyOverrides),
+        fingerprintValueService,
+        subject);
   }
 
-  public static Object deserialize(CodedInputStream codedIn, DeserializationContext context)
+  public Object deserialize(byte[] data) throws SerializationException {
+    return deserialize(CodedInputStream.newInstance(data));
+  }
+
+  public Object deserialize(ByteString data) throws SerializationException {
+    return deserialize(data.newCodedInput());
+  }
+
+  public Object deserialize(CodedInputStream codedIn) throws SerializationException {
+    return deserializeStreamFully(codedIn, deserializationContext);
+  }
+
+  public Object deserializeMemoized(ByteString data) throws SerializationException {
+    return MemoizingDeserializationContext.deserializeMemoized(
+        getCodecRegistry(), getDependencies(), data);
+  }
+
+  public Object deserializeMemoized(byte[] data) throws SerializationException {
+    return MemoizingDeserializationContext.deserializeMemoized(
+        getCodecRegistry(), getDependencies(), data);
+  }
+
+  public Object deserializeMemoizedAndBlocking(
+      FingerprintValueService fingerprintValueService, ByteString data)
+      throws SerializationException {
+    return SharedValueDeserializationContext.deserializeWithSharedValues(
+        getCodecRegistry(), getDependencies(), fingerprintValueService, data);
+  }
+
+  public Object deserializeMemoizedAndBlocking(
+      FingerprintValueService fingerprintValueService,
+      ByteString data,
+      ImmutableClassToInstanceMap<?> dependencyOverrides)
+      throws SerializationException {
+    return SharedValueDeserializationContext.deserializeWithSharedValues(
+        getCodecRegistry(),
+        overrideDependencies(getDependencies(), dependencyOverrides),
+        fingerprintValueService,
+        data);
+  }
+
+  static Object deserializeStreamFully(CodedInputStream codedIn, DeserializationContext context)
       throws SerializationException {
     // Allows access to buffer without copying (although this means buffer may be pinned in memory).
     codedIn.enableAliasing(true);
@@ -176,30 +239,6 @@ public class ObjectCodecs {
       throw new SerializationException("Error checking for end of stream with " + result, e);
     }
     return result;
-  }
-
-  public Object deserialize(ByteString data) throws SerializationException {
-    return deserialize(data.newCodedInput());
-  }
-
-  public Object deserialize(CodedInputStream codedIn) throws SerializationException {
-    return deserialize(codedIn, deserializationContext);
-  }
-
-  public Object deserializeMemoized(ByteString data) throws SerializationException {
-    return deserializeMemoized(data.newCodedInput());
-  }
-
-  public Object deserializeMemoized(
-      ByteString data, ImmutableClassToInstanceMap<?> dependencyOverrides)
-      throws SerializationException {
-    return deserialize(
-        data.newCodedInput(),
-        deserializationContext.withDependencyOverrides(dependencyOverrides).getMemoizingContext());
-  }
-
-  public Object deserializeMemoized(CodedInputStream codedIn) throws SerializationException {
-    return deserialize(codedIn, deserializationContext.getMemoizingContext());
   }
 
   // It's awkward that values are read from `serializationContext` instead of

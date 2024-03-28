@@ -18,6 +18,7 @@ import static com.google.common.truth.Truth.assertThat;
 import static com.google.common.truth.Truth.assertWithMessage;
 import static com.google.common.truth.extensions.proto.ProtoTruth.assertThat;
 import static com.google.devtools.build.lib.packages.Attribute.attr;
+import static com.google.devtools.build.lib.rules.python.PythonTestUtils.getPyLoad;
 import static com.google.devtools.build.lib.testutil.TestConstants.GENRULE_SETUP;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.junit.Assert.fail;
@@ -701,7 +702,8 @@ public abstract class AbstractQueryTest<T> {
     // "blaze query 'deps(<output file>, 1)' returns the output file,
     // not its generating rule"
     assertThat(eval("deps(//a:out, 0)")).isEqualTo(eval("//a:out"));
-    assertThat(eval("deps(//a:out, 1)")).isEqualTo(eval("//a:out + //a"));
+    assertThat(eval("deps(//a:out, 1)" + getDependencyCorrectionWithGen()))
+        .isEqualTo(eval("//a:out + //a"));
     assertThat(eval("deps(//a:out, 2)" + getDependencyCorrectionWithGen()))
         .isEqualTo(eval("//a:out + //a + //b + //c"));
 
@@ -1200,6 +1202,7 @@ public abstract class AbstractQueryTest<T> {
   public void testTestsOperatorExpandsTestsAndExcludesNonTests() throws Exception {
     writeFile(
         "a/BUILD",
+        getPyLoad("py_test"),
         "test_suite(name='a')",
         "sh_test(name='sh_test', srcs=['sh_test.sh'])",
         "py_test(name='py_test', srcs=['py_test.py'])",
@@ -1212,6 +1215,7 @@ public abstract class AbstractQueryTest<T> {
   public void testTestsOperatorFiltersByTagSizeAndEnv() throws Exception {
     writeFile(
         "b/BUILD",
+        getPyLoad("py_test"),
         "test_suite(name='large_tests', tags=['large'])",
         "test_suite(name='prod_tests', tags=['prod'])",
         "test_suite(name='foo_tests', tags=['foo'])",
@@ -1228,6 +1232,7 @@ public abstract class AbstractQueryTest<T> {
   public void testTestsOperatorFiltersByNegativeTag() throws Exception {
     writeFile(
         "b/BUILD",
+        getPyLoad("py_test"),
         "test_suite(name='foo_tests', tags=['foo'])",
         "test_suite(name='bar_tests', tags=['bar'])",
         "test_suite(name='foo_notbar_tests', tags=['foo', '-bar'])",
@@ -2203,8 +2208,9 @@ public abstract class AbstractQueryTest<T> {
         "package_group(name = 'pg', includes = [':other-pg'])",
         "package_group(name = 'other-pg')");
     assertEqualsFiltered(
-        "deps(//foo:gen) + //foo:out + //foo:pg + //foo:other-pg",
-        "deps(//foo:out)",
+        "deps(//foo:gen) + //foo:out + //foo:pg + //foo:other-pg"
+            + getDependencyCorrectionWithGen(),
+        "deps(//foo:out)" + getDependencyCorrectionWithGen(),
         Setting.NO_IMPLICIT_DEPS);
   }
 
@@ -2362,7 +2368,8 @@ public abstract class AbstractQueryTest<T> {
         "sh_binary(name = 'thief', srcs = ['thief.sh'])",
         "label_flag(name = 'myflag', build_setting_default = ':thief')");
 
-    assertThat(evalToString("deps(//donut:myflag, 1)")).isEqualTo("//donut:myflag //donut:thief");
+    assertThat(evalToString("deps(//donut:myflag, 1)" + getDependencyCorrectionWithGen()))
+        .isEqualTo("//donut:myflag //donut:thief");
   }
 
   @Test
@@ -2372,7 +2379,7 @@ public abstract class AbstractQueryTest<T> {
         "sh_binary(name = 'thief', srcs = ['thief.sh'])",
         "label_setting(name = 'mysetting', build_setting_default = ':thief')");
 
-    assertThat(evalToString("deps(//donut:mysetting, 1)"))
+    assertThat(evalToString("deps(//donut:mysetting, 1)" + getDependencyCorrectionWithGen()))
         .isEqualTo("//donut:mysetting //donut:thief");
   }
 

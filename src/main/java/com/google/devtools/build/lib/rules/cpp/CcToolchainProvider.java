@@ -273,16 +273,6 @@ public final class CcToolchainProvider {
     }
   }
 
-  /** Returns the files necessary for a 'strip' invocation. */
-  public NestedSet<Artifact> getStripFiles() throws EvalException, TypeException {
-    return value.getValue("_strip_files", Depset.class).getSet(Artifact.class);
-  }
-
-  /** Returns the files necessary for an 'objcopy' invocation. */
-  public NestedSet<Artifact> getObjcopyFiles() throws EvalException, TypeException {
-    return value.getValue("_objcopy_files", Depset.class).getSet(Artifact.class);
-  }
-
   /**
    * Returns the files necessary for an 'as' invocation. May be empty if the CROSSTOOL file does not
    * define as_files.
@@ -492,16 +482,6 @@ public final class CcToolchainProvider {
 
   public FdoContext getFdoContext() throws EvalException {
     return value.getValue("_fdo_context", FdoContext.class);
-  }
-
-  /**
-   * Unused, for compatibility with things internal to Google.
-   *
-   * @deprecated use platforms
-   */
-  @Deprecated
-  public String getTargetOS() throws EvalException {
-    return value.getValue("_target_os", String.class);
   }
 
   // Not all of CcToolchainProvider is exposed to Starlark, which makes implementing deep equality

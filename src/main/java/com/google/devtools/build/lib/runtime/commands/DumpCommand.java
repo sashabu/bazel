@@ -16,7 +16,13 @@ package com.google.devtools.build.lib.runtime.commands;
 
 import static java.util.stream.Collectors.toList;
 
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import com.google.devtools.build.lib.analysis.config.CoreOptionConverters.LabelConverter;
+import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.cmdline.LabelSyntaxException;
+import com.google.devtools.build.lib.cmdline.PackageIdentifier;
+import com.google.devtools.build.lib.collect.ConcurrentIdentitySet;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.ExtendedEventHandler;
 import com.google.devtools.build.lib.events.Reporter;
@@ -34,11 +40,19 @@ import com.google.devtools.build.lib.runtime.CommandEnvironment;
 import com.google.devtools.build.lib.server.FailureDetails;
 import com.google.devtools.build.lib.server.FailureDetails.DumpCommand.Code;
 import com.google.devtools.build.lib.server.FailureDetails.FailureDetail;
+import com.google.devtools.build.lib.skyframe.BzlLoadValue;
 import com.google.devtools.build.lib.skyframe.SkyframeExecutor;
 import com.google.devtools.build.lib.skyframe.SkyframeExecutor.RuleStat;
+import com.google.devtools.build.lib.util.MemoryAccountant;
+import com.google.devtools.build.lib.util.MemoryAccountant.Stats;
+import com.google.devtools.build.lib.util.ObjectGraphTraverser;
+import com.google.devtools.build.lib.util.ObjectGraphTraverser.FieldCache;
 import com.google.devtools.build.lib.util.RegexFilter;
 import com.google.devtools.build.lib.util.RegexFilter.RegexFilterConverter;
 import com.google.devtools.build.skyframe.MemoizingEvaluator;
+import com.google.devtools.build.skyframe.NodeEntry;
+import com.google.devtools.build.skyframe.QueryableGraph.Reason;
+import com.google.devtools.build.skyframe.SkyKey;
 import com.google.devtools.common.options.EnumConverter;
 import com.google.devtools.common.options.Option;
 import com.google.devtools.common.options.OptionDocumentationCategory;
@@ -56,6 +70,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import javax.annotation.Nullable;
 
 /** Implementation of the dump command. */
 @Command(
@@ -71,6 +86,20 @@ import java.util.Optional;
     shortDescription = "Dumps the internal state of the %{product} server process.",
     binaryStdOut = true)
 public class DumpCommand implements BlazeCommand {
+
+  /** How to dump Skyframe memory. */
+  public enum MemoryMode {
+    NONE, // Memory dumping disabled
+    SHALLOW, // Dump the objects owned by a single SkyValue
+    DEEP, // Dump objects reachable from a single SkyValue
+  }
+
+  /** Converter for {@link MemoryMode}. */
+  public static final class MemoryModeConverter extends EnumConverter<MemoryMode> {
+    public MemoryModeConverter() {
+      super(MemoryMode.class, "memory mode");
+    }
+  }
 
   /**
    * NB! Any changes to this class must be kept in sync with anyOutput variable value in the {@link
@@ -130,7 +159,9 @@ public class DumpCommand implements BlazeCommand {
         converter = SkyframeDumpEnumConverter.class,
         documentationCategory = OptionDocumentationCategory.OUTPUT_SELECTION,
         effectTags = {OptionEffectTag.BAZEL_MONITORING},
-        help = "Dump Skyframe graph: 'off', 'summary', 'count', 'value', 'deps', or 'rdeps'.")
+        help =
+            "Dump Skyframe graph: 'off', 'summary', 'count', 'value', 'deps', 'rdeps', or"
+                + " 'function_graph'.")
     public SkyframeDumpOption dumpSkyframe;
 
     @Option(
@@ -139,8 +170,36 @@ public class DumpCommand implements BlazeCommand {
         converter = RegexFilterConverter.class,
         documentationCategory = OptionDocumentationCategory.OUTPUT_SELECTION,
         effectTags = {OptionEffectTag.BAZEL_MONITORING},
-        help = "Regex filter of SkyKey names to output. Only used with --skyframe=deps, rdeps.")
+        help =
+            "Regex filter of SkyKey names to output. Only used with --skyframe=deps, rdeps,"
+                + " function_graph.")
     public RegexFilter skyKeyFilter;
+
+    @Option(
+        name = "memory",
+        defaultValue = "none",
+        converter = MemoryModeConverter.class,
+        documentationCategory = OptionDocumentationCategory.OUTPUT_SELECTION,
+        effectTags = {OptionEffectTag.BAZEL_MONITORING},
+        help = "Dump the memory use of a given Skyframe node.")
+    public MemoryMode memoryMode;
+
+    @Option(
+        name = "memory_starlark_module",
+        defaultValue = "null",
+        converter = LabelConverter.class,
+        documentationCategory = OptionDocumentationCategory.OUTPUT_SELECTION,
+        effectTags = {OptionEffectTag.BAZEL_MONITORING},
+        help = "The Starlark module whose memory use should be dumped.")
+    public Label memoryStarlarkModule;
+
+    @Option(
+        name = "memory_package",
+        defaultValue = "null",
+        documentationCategory = OptionDocumentationCategory.OUTPUT_SELECTION,
+        effectTags = {OptionEffectTag.BAZEL_MONITORING},
+        help = "The package whose memory use should be dumped.")
+    public String memoryPackage;
   }
 
   /**
@@ -152,7 +211,8 @@ public class DumpCommand implements BlazeCommand {
     COUNT,
     VALUE,
     DEPS,
-    RDEPS
+    RDEPS,
+    FUNCTION_GRAPH,
   }
 
   /**
@@ -163,6 +223,10 @@ public class DumpCommand implements BlazeCommand {
       super(SkyframeDumpOption.class, "Skyframe Dump option");
     }
   }
+
+  public static final String WARNING_MESSAGE =
+      "This information is intended for consumption by developers "
+          + "only, and may change at any time. Script against it at your own risk!";
 
   @Override
   public BlazeCommandResult exec(CommandEnvironment env, OptionsParsingResult options) {
@@ -175,7 +239,8 @@ public class DumpCommand implements BlazeCommand {
             || dumpOptions.dumpRuleClasses
             || dumpOptions.dumpRules
             || dumpOptions.starlarkMemory != null
-            || dumpOptions.dumpSkyframe != SkyframeDumpOption.OFF;
+            || dumpOptions.dumpSkyframe != SkyframeDumpOption.OFF
+            || dumpOptions.memoryMode != MemoryMode.NONE;
     if (!anyOutput) {
       Collection<Class<? extends OptionsBase>> optionList = new ArrayList<>();
       optionList.add(DumpOptions.class);
@@ -194,9 +259,7 @@ public class DumpCommand implements BlazeCommand {
     }
     PrintStream out = new PrintStream(env.getReporter().getOutErr().getOutputStream());
     try {
-      out.println("Warning: this information is intended for consumption by developers");
-      out.println("only, and may change at any time. Script against it at your own risk!");
-      out.println();
+      env.getReporter().handle(Event.warn(WARNING_MESSAGE));
       Optional<BlazeCommandResult> failure = Optional.empty();
 
       if (dumpOptions.dumpPackages) {
@@ -233,25 +296,19 @@ public class DumpCommand implements BlazeCommand {
         }
       }
 
+      if (dumpOptions.memoryMode != MemoryMode.NONE) {
+        failure = dumpSkyframeMemory(env, dumpOptions, out);
+      }
+
       MemoizingEvaluator evaluator = env.getSkyframeExecutor().getEvaluator();
       switch (dumpOptions.dumpSkyframe) {
-        case OFF:
-          break;
-        case SUMMARY:
-          evaluator.dumpSummary(out);
-          break;
-        case COUNT:
-          evaluator.dumpCount(out);
-          break;
-        case VALUE:
-          evaluator.dumpValues(out, dumpOptions.skyKeyFilter);
-          break;
-        case DEPS:
-          evaluator.dumpDeps(out, dumpOptions.skyKeyFilter);
-          break;
-        case RDEPS:
-          evaluator.dumpRdeps(out, dumpOptions.skyKeyFilter);
-          break;
+        case SUMMARY -> evaluator.dumpSummary(out);
+        case COUNT -> evaluator.dumpCount(out);
+        case VALUE -> evaluator.dumpValues(out, dumpOptions.skyKeyFilter);
+        case DEPS -> evaluator.dumpDeps(out, dumpOptions.skyKeyFilter);
+        case RDEPS -> evaluator.dumpRdeps(out, dumpOptions.skyKeyFilter);
+        case FUNCTION_GRAPH -> evaluator.dumpFunctionGraph(out, dumpOptions.skyKeyFilter);
+        case OFF -> {}
       }
 
       return failure.orElse(BlazeCommandResult.success());
@@ -403,6 +460,75 @@ public class DumpCommand implements BlazeCommand {
 
   private static String formatLong(long number) {
     return String.format("%,d", number);
+  }
+
+  @Nullable
+  private static SkyKey getMemoryDumpSkyKey(Reporter reporter, DumpOptions dumpOptions) {
+    List<SkyKey> result = new ArrayList<>();
+
+    if (dumpOptions.memoryStarlarkModule != null) {
+      result.add(BzlLoadValue.keyForBuild(dumpOptions.memoryStarlarkModule));
+    }
+
+    if (dumpOptions.memoryPackage != null) {
+      PackageIdentifier identifier;
+      try {
+        identifier = PackageIdentifier.parse(dumpOptions.memoryPackage);
+      } catch (LabelSyntaxException e) {
+        reporter.error(null, "Cannot parse package identifier: " + e.getMessage());
+        return null;
+      }
+
+      result.add(identifier);
+    }
+
+    if (result.size() != 1) {
+      reporter.error(null, "You must specify exactly one Skyframe node to dump.");
+      return null;
+    }
+
+    return result.get(0);
+  }
+
+  private static Optional<BlazeCommandResult> dumpSkyframeMemory(
+      CommandEnvironment env, DumpOptions dumpOptions, PrintStream out)
+      throws InterruptedException {
+    SkyKey skyKey = getMemoryDumpSkyKey(env.getReporter(), dumpOptions);
+    if (skyKey == null) {
+      return Optional.of(
+          createFailureResult("Cannot dump Skyframe memory", Code.SKYFRAME_MEMORY_DUMP_FAILED));
+    }
+
+    NodeEntry nodeEntry =
+        env.getSkyframeExecutor().getEvaluator().getInMemoryGraph().get(null, Reason.OTHER, skyKey);
+    if (nodeEntry == null) {
+      env.getReporter().error(null, "The requested node is not present.");
+      return Optional.of(
+          createFailureResult(
+              "The requested node is not present", Code.SKYFRAME_MEMORY_DUMP_FAILED));
+    }
+
+    if (dumpOptions.memoryMode != MemoryMode.DEEP) {
+      env.getReporter()
+          .error(
+              null,
+              String.format(
+                  "Requested dumping memory for '%s', but it's not implemented.\n", skyKey));
+      return Optional.of(
+          createFailureResult(
+              "Skyframe memory dumping not implemented", Code.SKYFRAME_MEMORY_DUMP_FAILED));
+    }
+
+    FieldCache fieldCache = new FieldCache(ImmutableList.of());
+    MemoryAccountant memoryAccountant = new MemoryAccountant();
+    ObjectGraphTraverser traverser =
+        new ObjectGraphTraverser(
+            fieldCache, new ConcurrentIdentitySet(128), false, memoryAccountant, null);
+    traverser.traverse(nodeEntry.getValue());
+
+    Stats stats = memoryAccountant.getStats();
+    out.printf("%d objects, %d bytes retained\n", stats.getObjectCount(), stats.getMemoryUse());
+    return Optional.empty();
   }
 
   private static void dumpStarlarkHeap(BlazeWorkspace workspace, String path, PrintStream out)

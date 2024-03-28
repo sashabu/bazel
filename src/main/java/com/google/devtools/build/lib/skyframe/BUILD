@@ -169,7 +169,6 @@ java_library(
         ":repository_mapping_function",
         ":repository_mapping_value",
         ":rule_configured_target_value",
-        ":sane_analysis_exception",
         ":sky_functions",
         ":sky_value_dirtiness_checker",
         ":skyframe_action_executor",
@@ -193,6 +192,7 @@ java_library(
         ":tests_for_target_pattern_function",
         ":tests_for_target_pattern_value",
         ":top_level_action_lookup_key_wrapper",
+        ":top_level_aspects_details_build_failed_exception",
         ":top_level_aspects_value",
         ":top_level_status_events",
         ":transitive_base_traversal_function",
@@ -230,6 +230,7 @@ java_library(
         "//src/main/java/com/google/devtools/build/lib/analysis:aspect_collection",
         "//src/main/java/com/google/devtools/build/lib/analysis:aspect_configured_event",
         "//src/main/java/com/google/devtools/build/lib/analysis:blaze_directories",
+        "//src/main/java/com/google/devtools/build/lib/analysis:config/additional_configuration_change_event",
         "//src/main/java/com/google/devtools/build/lib/analysis:config/build_configuration",
         "//src/main/java/com/google/devtools/build/lib/analysis:config/build_options",
         "//src/main/java/com/google/devtools/build/lib/analysis:config/config_conditions",
@@ -850,6 +851,7 @@ java_library(
         ":incremental_artifact_conflict_finder",
         ":package_value",
         ":precomputed_value",
+        ":sane_analysis_exception",
         ":target_completion_value",
         ":test_completion_value",
         ":top_level_aspects_value",
@@ -913,6 +915,18 @@ java_library(
         "//src/main/java/com/google/devtools/build/lib/analysis:configured_target",
         "//src/main/java/com/google/devtools/build/lib/concurrent",
         "//third_party:guava",
+    ],
+)
+
+java_library(
+    name = "top_level_aspects_details_build_failed_exception",
+    srcs = [
+        "TopLevelAspectsDetailsBuildFailedException.java",
+    ],
+    deps = [
+        ":sane_analysis_exception",
+        "//src/main/java/com/google/devtools/build/lib/util:detailed_exit_code",
+        "//src/main/protobuf:failure_details_java_proto",
     ],
 )
 
@@ -1485,10 +1499,12 @@ java_library(
     name = "globs_function",
     srcs = ["GlobsFunction.java"],
     deps = [
+        ":glob_descriptor",
         ":glob_exception",
         ":globs_value",
         ":ignored_package_prefixes_value",
         "//src/main/java/com/google/devtools/build/lib/cmdline",
+        "//src/main/java/com/google/devtools/build/lib/concurrent",
         "//src/main/java/com/google/devtools/build/lib/packages/producers",
         "//src/main/java/com/google/devtools/build/lib/vfs:pathfragment",
         "//src/main/java/com/google/devtools/build/skyframe",
@@ -2307,7 +2323,10 @@ java_library(
 
 java_library(
     name = "sane_analysis_exception",
-    srcs = ["SaneAnalysisException.java"],
+    srcs = [
+        "AbstractSaneAnalysisException.java",
+        "SaneAnalysisException.java",
+    ],
     deps = [
         ":detailed_exceptions",
     ],
@@ -2408,7 +2427,6 @@ java_library(
         ":sky_functions",
         ":test_completion_value",
         ":top_level_conflict_exception",
-        ":top_level_status_events",
         ":transitive_target_key",
         "//src/main/java/com/google/devtools/build/lib/actions",
         "//src/main/java/com/google/devtools/build/lib/actions:action_lookup_data",
@@ -2477,9 +2495,12 @@ java_library(
         "SkyframeFocuser.java",
     ],
     deps = [
+        ":directory_listing_state_value",
         ":precomputed_value",
         "//src/main/java/com/google/devtools/build/lib:runtime",
+        "//src/main/java/com/google/devtools/build/lib/actions",
         "//src/main/java/com/google/devtools/build/lib/actions:artifacts",
+        "//src/main/java/com/google/devtools/build/lib/analysis:analysis_phase_complete_event",
         "//src/main/java/com/google/devtools/build/lib/collect/nestedset:artifact_nested_set_key",
         "//src/main/java/com/google/devtools/build/lib/concurrent",
         "//src/main/java/com/google/devtools/build/lib/events",
@@ -2494,6 +2515,7 @@ java_library(
         "//src/main/java/com/google/devtools/build/skyframe",
         "//src/main/java/com/google/devtools/build/skyframe:skyframe-objects",
         "//src/main/protobuf:failure_details_java_proto",
+        "//third_party:error_prone_annotations",
         "//third_party:guava",
         "//third_party:jsr305",
     ],

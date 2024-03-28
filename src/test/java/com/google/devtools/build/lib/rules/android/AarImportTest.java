@@ -55,25 +55,6 @@ public class AarImportTest extends AndroidBuildViewTestCase {
   @Before
   public void setup() throws Exception {
     scratch.file(
-        "aapt2/sdk/BUILD",
-        "android_sdk(",
-        "    name = 'sdk',",
-        "    aapt = 'aapt',",
-        "    aapt2 = 'aapt2',",
-        "    adb = 'adb',",
-        "    aidl = 'aidl',",
-        "    android_jar = 'android.jar',",
-        "    apksigner = 'apksigner',",
-        "    dx = 'dx',",
-        "    framework_aidl = 'framework_aidl',",
-        "    main_dex_classes = 'main_dex_classes',",
-        "    main_dex_list_creator = 'main_dex_list_creator',",
-        "    proguard = 'proguard',",
-        "    shrinked_android_jar = 'shrinked_android_jar',",
-        "    zipalign = 'zipalign',",
-        "    tags = ['__ANDROID_RULES_MIGRATION__'],",
-        ")");
-    scratch.file(
         "a/BUILD",
         "java_import(",
         "    name = 'foo_src',",
@@ -177,8 +158,6 @@ public class AarImportTest extends AndroidBuildViewTestCase {
 
   @Test
   public void aapt2RTxtProvided() throws Exception {
-    useConfiguration("--android_sdk=//aapt2/sdk:sdk");
-
     ConfiguredTarget libTarget = getConfiguredTarget("//a:library");
 
     NestedSet<Artifact> transitiveCompiledSymbols =
@@ -581,20 +560,6 @@ public class AarImportTest extends AndroidBuildViewTestCase {
                 .filter(artifact -> artifact.getExecPathString().endsWith("/_aar/bar/jdeps.proto"))
                 .collect(Collectors.toList()))
         .hasSize(1);
-  }
-
-  @Test
-  public void testFailsWithoutAndroidSdk() throws Exception {
-    scratch.file("sdk/BUILD", "alias(", "    name = 'sdk',", "    actual = 'doesnotexist',", ")");
-    useConfiguration("--android_sdk=//sdk");
-    checkError(
-        "aar",
-        "aar",
-        "resolved to target //sdk:sdk, but that target does not provide ToolchainInfo",
-        "aar_import(",
-        "    name = 'aar',",
-        "    aar = 'a.aar',",
-        ")");
   }
 
   @Test

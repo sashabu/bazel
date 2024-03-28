@@ -73,6 +73,7 @@ import com.google.devtools.build.lib.packages.StarlarkProviderIdentifier;
 import com.google.devtools.build.lib.packages.StructImpl;
 import com.google.devtools.build.lib.packages.StructProvider;
 import com.google.devtools.build.lib.packages.Type;
+import com.google.devtools.build.lib.packages.Types;
 import com.google.devtools.build.lib.starlark.util.BazelEvaluationTestCase;
 import com.google.devtools.build.lib.testutil.MoreAsserts;
 import com.google.devtools.build.lib.testutil.TestConstants;
@@ -207,8 +208,8 @@ public final class StarlarkRuleClassFunctionsTest extends BuildViewTestCase {
         "  pass",
         "exec_rule = rule(implementation = _impl, executable = True)",
         "non_exec_rule = rule(implementation = _impl)");
-    assertThat(getRuleClass("exec_rule").hasAttr("args", Type.STRING_LIST)).isTrue();
-    assertThat(getRuleClass("non_exec_rule").hasAttr("args", Type.STRING_LIST)).isFalse();
+    assertThat(getRuleClass("exec_rule").hasAttr("args", Types.STRING_LIST)).isTrue();
+    assertThat(getRuleClass("non_exec_rule").hasAttr("args", Types.STRING_LIST)).isFalse();
   }
 
   /**
@@ -230,13 +231,17 @@ public final class StarlarkRuleClassFunctionsTest extends BuildViewTestCase {
     setBuildLanguageOptions("--experimental_enable_first_class_macros=false");
 
     scratch.file(
-        "pkg/foo.bzl", //
-        "def _impl(name):",
-        "    pass",
-        "my_macro = macro(implementation=_impl)");
+        "pkg/foo.bzl",
+        """
+        def _impl(name):
+            pass
+        my_macro = macro(implementation=_impl)
+        """);
     scratch.file(
-        "pkg/BUILD", //
-        "load(':foo.bzl', 'my_macro')");
+        "pkg/BUILD",
+        """
+        load(":foo.bzl", "my_macro")
+        """);
 
     reporter.removeHandler(failFastHandler);
     Package pkg = getPackage("pkg");
@@ -249,16 +254,20 @@ public final class StarlarkRuleClassFunctionsTest extends BuildViewTestCase {
     setBuildLanguageOptions("--experimental_enable_first_class_macros");
 
     scratch.file(
-        "pkg/foo.bzl", //
-        "def _impl(name):",
-        "    pass",
-        "my_macro = macro(implementation=_impl)");
+        "pkg/foo.bzl",
+        """
+        def _impl(name):
+            pass
+        my_macro = macro(implementation=_impl)
+        """);
     scratch.file(
-        "pkg/BUILD", //
-        "load(':foo.bzl', 'my_macro')",
-        "my_macro(name='ghi')", // alphabetized when read back
-        "my_macro(name='abc')",
-        "my_macro(name='def')");
+        "pkg/BUILD",
+        """
+        load(":foo.bzl", "my_macro")
+        my_macro(name="ghi")  # alphabetized when read back
+        my_macro(name="abc")
+        my_macro(name="def")
+        """);
 
     Package pkg = getPackage("pkg");
     assertThat(pkg.getMacros().keySet()).containsExactly("abc", "def", "ghi").inOrder();
@@ -270,14 +279,18 @@ public final class StarlarkRuleClassFunctionsTest extends BuildViewTestCase {
     setBuildLanguageOptions("--experimental_enable_first_class_macros");
 
     scratch.file(
-        "pkg/foo.bzl", //
-        "def _impl(name):",
-        "    pass",
-        "s = struct(m = macro(implementation=_impl))");
+        "pkg/foo.bzl",
+        """
+        def _impl(name):
+            pass
+        s = struct(m = macro(implementation=_impl))
+        """);
     scratch.file(
-        "pkg/BUILD", //
-        "load(':foo.bzl', 's')",
-        "s.m(name='abc')");
+        "pkg/BUILD",
+        """
+        load(":foo.bzl", "s")
+        s.m(name="abc")
+        """);
 
     reporter.removeHandler(failFastHandler);
     Package pkg = getPackage("pkg");
@@ -292,19 +305,23 @@ public final class StarlarkRuleClassFunctionsTest extends BuildViewTestCase {
 
     scratch.file(
         "pkg/foo.bzl",
-        "def _impl(name):",
-        "    pass",
-        "my_macro = macro(implementation=_impl)",
-        "",
-        // Calling it from a function during .bzl load time is a little more interesting than
-        // calling it directly at the top level, since it forces us to check thread state rather
-        // than call stack state.
-        "def some_func():",
-        "    my_macro(name='nope')",
-        "some_func()");
+        """
+        def _impl(name):
+            pass
+        my_macro = macro(implementation=_impl)
+
+        # Calling it from a function during .bzl load time is a little more interesting than
+        # calling it directly at the top level, since it forces us to check thread state rather
+        # than call stack state.
+        def some_func():
+            my_macro(name="nope")
+        some_func()
+        """);
     scratch.file(
-        "pkg/BUILD", //
-        "load(':foo.bzl', 'my_macro')");
+        "pkg/BUILD",
+        """
+        load(":foo.bzl", "my_macro")
+        """);
 
     reporter.removeHandler(failFastHandler);
     Package pkg = getPackage("pkg");
@@ -317,14 +334,18 @@ public final class StarlarkRuleClassFunctionsTest extends BuildViewTestCase {
     setBuildLanguageOptions("--experimental_enable_first_class_macros");
 
     scratch.file(
-        "pkg/foo.bzl", //
-        "def _impl(name):",
-        "    pass",
-        "my_macro = macro(implementation=_impl)");
+        "pkg/foo.bzl",
+        """
+        def _impl(name):
+            pass
+        my_macro = macro(implementation=_impl)
+        """);
     scratch.file(
-        "pkg/BUILD", //
-        "load(':foo.bzl', 'my_macro')",
-        "my_macro()");
+        "pkg/BUILD",
+        """
+        load(":foo.bzl", "my_macro")
+        my_macro()
+        """);
 
     reporter.removeHandler(failFastHandler);
     Package pkg = getPackage("pkg");
@@ -338,14 +359,18 @@ public final class StarlarkRuleClassFunctionsTest extends BuildViewTestCase {
     setBuildLanguageOptions("--experimental_enable_first_class_macros");
 
     scratch.file(
-        "pkg/foo.bzl", //
-        "def _impl(name):",
-        "    pass",
-        "my_macro = macro(implementation=_impl)");
+        "pkg/foo.bzl",
+        """
+        def _impl(name):
+            pass
+        my_macro = macro(implementation=_impl)
+        """);
     scratch.file(
-        "pkg/BUILD", //
-        "load(':foo.bzl', 'my_macro')",
-        "my_macro('a positional arg', name = 'abc')");
+        "pkg/BUILD",
+        """
+        load(":foo.bzl", "my_macro")
+        my_macro("a positional arg", name = "abc")
+        """);
 
     reporter.removeHandler(failFastHandler);
     Package pkg = getPackage("pkg");
@@ -359,11 +384,13 @@ public final class StarlarkRuleClassFunctionsTest extends BuildViewTestCase {
     ev.setSemantics("--experimental_enable_first_class_macros");
 
     evalAndExport(
-        ev, //
-        "def _impl(name):",
-        "    pass",
-        "exported = macro(implementation=_impl)",
-        "s = struct(unexported = macro(implementation=_impl))");
+        ev,
+        """
+        def _impl(name):
+            pass
+        exported = macro(implementation=_impl)
+        s = struct(unexported = macro(implementation=_impl))
+        """);
 
     MacroFunction exported = (MacroFunction) ev.lookup("exported");
     MacroFunction unexported = (MacroFunction) ev.eval("s.unexported");
@@ -390,7 +417,7 @@ public final class StarlarkRuleClassFunctionsTest extends BuildViewTestCase {
   public void testAttrWithOnlyType() throws Exception {
     Attribute attr = buildAttribute("a1", "attr.string_list()");
     assertThat(attr.starlarkDefined()).isTrue();
-    assertThat(attr.getType()).isEqualTo(Type.STRING_LIST);
+    assertThat(attr.getType()).isEqualTo(Types.STRING_LIST);
   }
 
   private Attribute buildAttribute(String name, String... lines) throws Exception {
@@ -412,7 +439,7 @@ public final class StarlarkRuleClassFunctionsTest extends BuildViewTestCase {
   public void testIntListAttr() throws Exception {
     Attribute attr = buildAttribute("a1", "attr.int_list()");
     assertThat(attr.starlarkDefined()).isTrue();
-    assertThat(attr.getType()).isEqualTo(Type.INTEGER_LIST);
+    assertThat(attr.getType()).isEqualTo(Types.INTEGER_LIST);
   }
 
   @Test
@@ -426,14 +453,14 @@ public final class StarlarkRuleClassFunctionsTest extends BuildViewTestCase {
   public void testStringDictAttr() throws Exception {
     Attribute attr = buildAttribute("a1", "attr.string_dict(default = {'a': 'b'})");
     assertThat(attr.starlarkDefined()).isTrue();
-    assertThat(attr.getType()).isEqualTo(Type.STRING_DICT);
+    assertThat(attr.getType()).isEqualTo(Types.STRING_DICT);
   }
 
   @Test
   public void testStringListDictAttr() throws Exception {
     Attribute attr = buildAttribute("a1", "attr.string_list_dict(default = {'a': ['b', 'c']})");
     assertThat(attr.starlarkDefined()).isTrue();
-    assertThat(attr.getType()).isEqualTo(Type.STRING_LIST_DICT);
+    assertThat(attr.getType()).isEqualTo(Types.STRING_LIST_DICT);
   }
 
   @Test
@@ -937,7 +964,7 @@ public final class StarlarkRuleClassFunctionsTest extends BuildViewTestCase {
   private static RuleClass ruleClass(String name) {
     return new RuleClass.Builder(name, RuleClassType.NORMAL, false)
         .factory(DUMMY_CONFIGURED_TARGET_FACTORY)
-        .add(Attribute.attr("tags", Type.STRING_LIST))
+        .add(Attribute.attr("tags", Types.STRING_LIST))
         .build();
   }
 
@@ -1412,7 +1439,7 @@ public final class StarlarkRuleClassFunctionsTest extends BuildViewTestCase {
   public void testRuleInheritsBaseRuleAttributes() throws Exception {
     evalAndExport(ev, "def impl(ctx): return None", "r1 = rule(impl)");
     RuleClass c = ((StarlarkRuleFunction) ev.lookup("r1")).getRuleClass();
-    assertThat(c.hasAttr("tags", Type.STRING_LIST)).isTrue();
+    assertThat(c.hasAttr("tags", Types.STRING_LIST)).isTrue();
     assertThat(c.hasAttr("visibility", BuildType.NODEP_LABEL_LIST)).isTrue();
     assertThat(c.hasAttr("deprecation", Type.STRING)).isTrue();
     assertThat(c.hasAttr(":action_listener", BuildType.LABEL_LIST))
@@ -1430,12 +1457,14 @@ public final class StarlarkRuleClassFunctionsTest extends BuildViewTestCase {
 
   @Test
   public void testSimpleTextMessagesBooleanFields() throws Exception {
+    setBuildLanguageOptions("--incompatible_struct_has_no_methods=false");
     checkTextMessage("struct(name=True).to_proto()", "name: true");
     checkTextMessage("struct(name=False).to_proto()", "name: false");
   }
 
   @Test
   public void testStructRestrictedOverrides() throws Exception {
+    setBuildLanguageOptions("--incompatible_struct_has_no_methods=false");
     ev.checkEvalErrorContains(
         "cannot override built-in struct function 'to_json'", "struct(to_json='foo')");
 
@@ -1445,6 +1474,7 @@ public final class StarlarkRuleClassFunctionsTest extends BuildViewTestCase {
 
   @Test
   public void testSimpleTextMessages() throws Exception {
+    setBuildLanguageOptions("--incompatible_struct_has_no_methods=false");
     checkTextMessage("struct(name='value').to_proto()", "name: \"value\"");
     checkTextMessage("struct(name=[]).to_proto()"); // empty lines
     checkTextMessage("struct(name=['a', 'b']).to_proto()", "name: \"a\"", "name: \"b\"");
@@ -1530,11 +1560,13 @@ public final class StarlarkRuleClassFunctionsTest extends BuildViewTestCase {
 
   @Test
   public void testProtoFieldsOrder() throws Exception {
+    setBuildLanguageOptions("--incompatible_struct_has_no_methods=false");
     checkTextMessage("struct(d=4, b=2, c=3, a=1).to_proto()", "a: 1", "b: 2", "c: 3", "d: 4");
   }
 
   @Test
   public void testTextMessageEscapes() throws Exception {
+    setBuildLanguageOptions("--incompatible_struct_has_no_methods=false");
     checkTextMessage("struct(name='a\"b').to_proto()", "name: \"a\\\"b\"");
     checkTextMessage("struct(name='a\\'b').to_proto()", "name: \"a'b\"");
     checkTextMessage("struct(name='a\\nb').to_proto()", "name: \"a\\nb\"");
@@ -1545,6 +1577,7 @@ public final class StarlarkRuleClassFunctionsTest extends BuildViewTestCase {
 
   @Test
   public void testTextMessageInvalidStructure() throws Exception {
+    setBuildLanguageOptions("--incompatible_struct_has_no_methods=false");
     // list in list
     ev.checkEvalErrorContains(
         "in struct field .a: at list index 0: got list, want string, int, float, bool, or struct",
@@ -1594,12 +1627,14 @@ public final class StarlarkRuleClassFunctionsTest extends BuildViewTestCase {
 
   @Test
   public void testJsonBooleanFields() throws Exception {
+    setBuildLanguageOptions("--incompatible_struct_has_no_methods=false");
     checkJson("struct(name=True).to_json()", "{\"name\":true}");
     checkJson("struct(name=False).to_json()", "{\"name\":false}");
   }
 
   @Test
   public void testJsonDictFields() throws Exception {
+    setBuildLanguageOptions("--incompatible_struct_has_no_methods=false");
     checkJson("struct(config={}).to_json()", "{\"config\":{}}");
     checkJson("struct(config={'key': 'value'}).to_json()", "{\"config\":{\"key\":\"value\"}}");
     ev.checkEvalErrorContains(
@@ -1615,6 +1650,7 @@ public final class StarlarkRuleClassFunctionsTest extends BuildViewTestCase {
 
   @Test
   public void testJsonEncoding() throws Exception {
+    setBuildLanguageOptions("--incompatible_struct_has_no_methods=false");
     checkJson("struct(name='value').to_json()", "{\"name\":\"value\"}");
     checkJson("struct(name=['a', 'b']).to_json()", "{\"name\":[\"a\",\"b\"]}");
     checkJson("struct(name=123).to_json()", "{\"name\":123}");
@@ -1628,6 +1664,7 @@ public final class StarlarkRuleClassFunctionsTest extends BuildViewTestCase {
 
   @Test
   public void testJsonEscapes() throws Exception {
+    setBuildLanguageOptions("--incompatible_struct_has_no_methods=false");
     checkJson("struct(name='a\"b').to_json()", "{\"name\":\"a\\\"b\"}");
     checkJson("struct(name='a\\'b').to_json()", "{\"name\":\"a'b\"}");
     checkJson("struct(name='a\\\\b').to_json()", "{\"name\":\"a\\\\b\"}");
@@ -1638,11 +1675,13 @@ public final class StarlarkRuleClassFunctionsTest extends BuildViewTestCase {
 
   @Test
   public void testJsonNestedListStructure() throws Exception {
+    setBuildLanguageOptions("--incompatible_struct_has_no_methods=false");
     checkJson("struct(a=[['b']]).to_json()", "{\"a\":[[\"b\"]]}");
   }
 
   @Test
   public void testJsonInvalidStructure() throws Exception {
+    setBuildLanguageOptions("--incompatible_struct_has_no_methods=false");
     ev.checkEvalErrorContains(
         "Invalid text format, expected a struct, a string, a bool, or an int but got a "
             + "builtin_function_or_method for struct field 'a'",
@@ -2834,7 +2873,7 @@ public final class StarlarkRuleClassFunctionsTest extends BuildViewTestCase {
       throws Exception {
     scratch.file(
         "r/create.bzl",
-        "def f(ctx): return struct(value=ctx.attr.to_json())",
+        "def f(ctx): return struct(value=json.encode(ctx.attr))",
         "def create(attrs): return rule(implementation=f, attrs=attrs)");
     scratch.file("r/def.bzl", "load(':create.bzl', 'create')", "r = create({})");
     scratch.file("r/BUILD", "load(':def.bzl', 'r')", "r(name='r')");
@@ -5044,7 +5083,6 @@ public final class StarlarkRuleClassFunctionsTest extends BuildViewTestCase {
             bzlLabel,
             RepositoryMapping.create(
                 ImmutableMap.of("my_module", currentRepo, "dep", otherRepo), currentRepo),
-            /* bestEffortMainRepoMapping= */ null,
             "lib/label.bzl",
             /* loads= */ ImmutableList.of(),
             /* bzlTransitiveDigest= */ new byte[0]);

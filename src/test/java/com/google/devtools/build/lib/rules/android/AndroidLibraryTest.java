@@ -51,6 +51,7 @@ import com.google.devtools.build.lib.rules.java.JavaCompileAction;
 import com.google.devtools.build.lib.rules.java.JavaInfo;
 import com.google.devtools.build.lib.rules.java.JavaRuleOutputJarsProvider;
 import com.google.devtools.build.lib.rules.java.JavaSemantics;
+import com.google.devtools.build.lib.testutil.TestConstants;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import java.util.Arrays;
 import java.util.List;
@@ -800,6 +801,11 @@ public class AndroidLibraryTest extends AndroidBuildViewTestCase {
         "    zipalign = 'zipalign',",
         "    tags = ['__ANDROID_RULES_MIGRATION__'],",
         ")",
+        "toolchain(",
+        "    name = 'sdk_toolchain',",
+        String.format("    toolchain_type = '%s',", TestConstants.ANDROID_TOOLCHAIN_TYPE_LABEL),
+        "    toolchain = ':sdk',",
+        ")",
         "java_library(",
         "    name = 'aidl_lib',",
         "    srcs = ['AidlLib.java'],",
@@ -829,7 +835,7 @@ public class AndroidLibraryTest extends AndroidBuildViewTestCase {
         "    manifest = 'AndroidManifest.xml',",
         "    proguard_specs = ['proguard-spec.pro'],",
         ")");
-    useConfiguration("--android_sdk=//sdk:sdk");
+    useConfiguration("--extra_toolchains=//sdk:sdk_toolchain");
 
     // Targets with AIDL-generated sources also get AIDL support lib Proguard specs
     ConfiguredTarget binary = getConfiguredTarget("//java/com/google/android/hello:binary");
@@ -1886,6 +1892,11 @@ public class AndroidLibraryTest extends AndroidBuildViewTestCase {
         "    shrinked_android_jar = 'shrinked_android_jar',",
         "    zipalign = 'zipalign',",
         "    tags = ['__ANDROID_RULES_MIGRATION__'],",
+        ")",
+        "toolchain(",
+        "    name = 'sdk_toolchain',",
+        String.format("    toolchain_type = '%s',", TestConstants.ANDROID_TOOLCHAIN_TYPE_LABEL),
+        "    toolchain = ':sdk',",
         ")");
     scratch.file(
         "java/a/BUILD",
@@ -1903,7 +1914,7 @@ public class AndroidLibraryTest extends AndroidBuildViewTestCase {
         "    resource_files = ['res/values/b.xml'],",
         ")");
 
-    useConfiguration("--android_sdk=//sdk:sdk");
+    useConfiguration("--extra_toolchains=//sdk:sdk_toolchain");
     ConfiguredTarget a = getConfiguredTarget("//java/a:a");
     ConfiguredTarget b = getDirectPrerequisite(a, "//java/a:b");
     ConfiguredTarget sdk = getDirectPrerequisite(a, "//sdk:sdk");
@@ -1949,25 +1960,6 @@ public class AndroidLibraryTest extends AndroidBuildViewTestCase {
   @Test
   public void compileDataBindingOutputWhenDataBindingEnabled() throws Exception {
     scratch.file(
-        "sdk/BUILD",
-        "android_sdk(",
-        "    name = 'sdk',",
-        "    aapt = 'aapt',",
-        "    aapt2 = 'aapt2',",
-        "    adb = 'adb',",
-        "    aidl = 'aidl',",
-        "    android_jar = 'android.jar',",
-        "    apksigner = 'apksigner',",
-        "    dx = 'dx',",
-        "    framework_aidl = 'framework_aidl',",
-        "    main_dex_classes = 'main_dex_classes',",
-        "    main_dex_list_creator = 'main_dex_list_creator',",
-        "    proguard = 'proguard',",
-        "    shrinked_android_jar = 'shrinked_android_jar',",
-        "    zipalign = 'zipalign',",
-        "    tags = ['__ANDROID_RULES_MIGRATION__'],",
-        ")");
-    scratch.file(
         "java/a/BUILD",
         "android_library(",
         "    name = 'a', ",
@@ -1976,7 +1968,6 @@ public class AndroidLibraryTest extends AndroidBuildViewTestCase {
         "    manifest = 'a/AndroidManifest.xml',",
         "    resource_files = ['res/values/a.xml']",
         ")");
-    useConfiguration("--android_sdk=//sdk:sdk");
     ConfiguredTarget a = getConfiguredTarget("//java/a:a");
 
     SpawnAction compileAction =

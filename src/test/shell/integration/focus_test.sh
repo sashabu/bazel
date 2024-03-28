@@ -204,8 +204,6 @@ EOF
   assert_contains "a change" $out
 }
 
-
-
 function test_focus_command_prints_info_about_graph() {
   local -r pkg=${FUNCNAME[0]}
   mkdir ${pkg}|| fail "cannot mkdir ${pkg}"
@@ -229,40 +227,72 @@ EOF
   expect_log "Nodes in reverse transitive closure from leafs: .\+"
   expect_log "Nodes in direct deps of reverse transitive closure: .\+"
   expect_log "Rdep edges: .\+ -> .\+"
-  expect_log "Heap: .\+MB -> .\+MB (.\+% reduction)"
-  expect_log "Node count: .\+ -> .\+ (.\+% reduction)"
+  expect_log "Heap: .\+MB -> .\+MB (-.\+%)"
+  expect_log "Node count: .\+ -> .\+ (-.\+%)"
 }
 
-function test_focus_command_dump_keys_prints_more_info_about_graph() {
+function test_focus_command_dump_keys_verbose() {
   local -r pkg=${FUNCNAME[0]}
   mkdir ${pkg}|| fail "cannot mkdir ${pkg}"
   mkdir -p ${pkg}
   echo "input" > ${pkg}/in.txt
-  cat > ${pkg}/BUILD <<EOF
+  cat > ${pkg}/BUILD <<'EOF'
 genrule(
   name = "g",
   srcs = ["in.txt"],
   outs = ["out.txt"],
-  cmd = "cp \$< \$@",
+  cmd = "cp $< $@",
 )
 EOF
 
   out=$(bazel info "${PRODUCT_NAME}-genfiles")/${pkg}/out.txt
   bazel build //${pkg}:g \
-    --experimental_skyfocus_dump_keys \
+    --experimental_skyfocus_dump_keys=verbose \
     --experimental_working_set=${pkg}/in.txt >$TEST_log 2>&1
 
   expect_log "Focusing on .\+ roots, .\+ leafs"
 
-  # additional info
+  # Dumps headers
   expect_log "Rdeps kept:"
-  expect_log "BUILD_DRIVER:"
-
   expect_log "Deps kept:"
-  expect_log "BUILD_CONFIGURATION:"
+  expect_log "Verification set:"
 
-  expect_log "Summary of kept keys:"
-  expect_log "BUILD_DRIVER"
+  # Dumps SkyKey strings
+  expect_log "BUILD_DRIVER:BuildDriverKey"
+  expect_log "BUILD_CONFIGURATION:BuildConfigurationKey"
+  expect_log "FILE_STATE:\[.\+\]"
+
+  # Doesn't dump counts
+  expect_not_log "FILE_STATE: .\+ -> .\+ (-.\+%)"
+}
+
+function test_focus_command_dump_keys_count() {
+  local -r pkg=${FUNCNAME[0]}
+  mkdir ${pkg}|| fail "cannot mkdir ${pkg}"
+  mkdir -p ${pkg}
+  echo "input" > ${pkg}/in.txt
+  cat > ${pkg}/BUILD <<'EOF'
+genrule(
+  name = "g",
+  srcs = ["in.txt"],
+  outs = ["out.txt"],
+  cmd = "cp $< $@",
+)
+EOF
+
+  out=$(bazel info "${PRODUCT_NAME}-genfiles")/${pkg}/out.txt
+  bazel build //${pkg}:g \
+    --experimental_skyfocus_dump_keys=count \
+    --experimental_working_set=${pkg}/in.txt >$TEST_log 2>&1
+
+  # Dumps counts
+  expect_log "Roots kept: .\+"
+  expect_log "Leafs kept: .\+"
+  expect_log "CONFIGURED_TARGET: .\+ -> .\+ (-.\+%)"
+  expect_log "FILE_STATE: .\+ -> .\+ (-.\+%)"
+
+  # Doesn't dump SkyKey strings
+  expect_not_log "FILE_STATE:[.\+]"
 }
 
 function test_builds_new_target_after_using_focus() {
@@ -581,6 +611,244 @@ EOF
   bazel build //${pkg}/a/b --experimental_working_set=${pkg}/a,${pkg}/a/b \
     || fail "expected build to succeed"
   assert_contains "a change" $out
+}
+
+function test_glob_inputs_change_with_dir_in_working_set() {
+  local -r pkg=${FUNCNAME[0]}
+  mkdir -p ${pkg}
+  touch ${pkg}/in.txt ${pkg}/in2.txt ${pkg}/in3.txt
+  cat > ${pkg}/BUILD <<EOF
+genrule(
+  name = "g",
+  outs = ["out.txt"],
+  cmd = "echo %s > \$@" % glob(["*.txt"]),
+)
+EOF
+
+  out=$(bazel info "${PRODUCT_NAME}-genfiles")/${pkg}/out.txt
+
+  # Define the working set as ${pkg}, which will exclude the
+  # DIRECTORY_LISTING_STATE($pkg) in the verification set.
+  bazel build //${pkg}:g --experimental_working_set=${pkg}
+  assert_contains "in.txt" $out
+  assert_contains "in2.txt" $out
+  assert_contains "in3.txt" $out
+
+  # Remove in3.txt from the glob, invalidating DIRECTORY_LISTING_STATE($pkg),
+  # and build should work.
+  rm ${pkg}/in3.txt
+  bazel build //${pkg}:g || fail "expected build to succeed"
+  assert_contains "in.txt" $out
+  assert_contains "in2.txt" $out
+  assert_not_contains "in3.txt" $out
+}
+
+function test_errors_after_glob_inputs_change_without_dir_in_working_set() {
+  local -r pkg=${FUNCNAME[0]}
+  mkdir -p ${pkg}
+  touch ${pkg}/in.txt ${pkg}/in2.txt ${pkg}/in3.txt
+  cat > ${pkg}/BUILD <<EOF
+genrule(
+  name = "g",
+  outs = ["out.txt"],
+  cmd = "echo %s > \$@" % glob(["*.txt"]),
+)
+EOF
+
+  out=$(bazel info "${PRODUCT_NAME}-genfiles")/${pkg}/out.txt
+
+  # Define the working set as ${pkg}/BUILD only, which will cause
+  # DIRECTORY_LISTING_STATE($pkg) to be in the verification set.
+  bazel build //${pkg}:g --experimental_working_set=${pkg}/BUILD
+  assert_contains "in.txt" $out
+  assert_contains "in2.txt" $out
+  assert_contains "in3.txt" $out
+
+  # Remove in3.txt from the glob, and expect the build to fail because the
+  # DIRECTORY_LISTING_STATE($pkg) in the verification set has changed.
+  rm ${pkg}/in3.txt
+  bazel build //${pkg}:g &>"$TEST_log" && fail "expected build to fail"
+  expect_log "detected changes outside of the working set"
+  expect_log "${pkg}"
+}
+
+function test_does_not_run_if_build_fails() {
+  local -r pkg=${FUNCNAME[0]}
+  mkdir ${pkg}|| fail "cannot mkdir ${pkg}"
+  mkdir -p ${pkg}
+  echo "input" > ${pkg}/in.txt
+  cat > ${pkg}/BUILD <<EOF
+genrule() # error
+EOF
+
+  bazel build //${pkg}:g \
+    --experimental_working_set=${pkg}/in.txt &>$TEST_log \
+    && "expected build to fail"
+  expect_log "Error in genrule"
+  expect_log "Skyfocus did not run due to an unsuccessful build."
+}
+
+function test_reanalysis_with_label_flag_change() {
+  local -r pkg=${FUNCNAME[0]}
+  mkdir -p ${pkg}
+  touch ${pkg}/in.txt
+
+  cat > ${pkg}/BUILD <<EOF
+load("//${pkg}:rules.bzl", "my_rule", "simple_rule")
+
+my_rule(name = "my_rule", src = "in.txt")
+
+simple_rule(name = "default", value = "default_val")
+
+simple_rule(name = "command_line", value = "command_line_val")
+
+label_flag(
+    name = "my_label_build_setting",
+    build_setting_default = ":default"
+)
+EOF
+
+  cat > ${pkg}/rules.bzl <<EOF
+def _impl(ctx):
+    _setting = "value=" + ctx.attr._label_flag[SimpleRuleInfo].value
+
+    out = ctx.actions.declare_file(ctx.attr.name + ".txt")
+    ctx.actions.run_shell(
+        inputs = [ctx.file.src],
+        outputs = [out],
+        command = " ".join(["cat", ctx.file.src.path, ">", out.path, "&&", "echo", _setting, ">>", out.path]),
+    )
+
+    return [DefaultInfo(files = depset([out]))]
+
+my_rule = rule(
+    implementation = _impl,
+    attrs = {
+        "src": attr.label(allow_single_file = True),
+        "_label_flag": attr.label(default = Label("//${pkg}:my_label_build_setting")),
+    },
+)
+
+SimpleRuleInfo = provider(fields = ['value'])
+
+def _simple_rule_impl(ctx):
+    return [SimpleRuleInfo(value = ctx.attr.value)]
+
+simple_rule = rule(
+    implementation = _simple_rule_impl,
+    attrs = {
+        "value": attr.string(),
+    },
+)
+EOF
+
+  out=$(bazel info "${PRODUCT_NAME}-bin")/${pkg}/my_rule.txt
+  bazel build //${pkg}:my_rule --experimental_working_set=${pkg}/in.txt \
+    || fail "expected build to succeed"
+
+  assert_contains "value=default_val" ${out}
+
+  # Change the configuration dep.
+  bazel build //${pkg}:my_rule --//${pkg}:my_label_build_setting=//${pkg}:command_line &> "$TEST_log" \
+    || fail "expected build to succeed"
+
+  # Analysis cache should be dropped due to the changed configuration.
+  expect_log "WARNING: Build option --//${pkg}:my_label_build_setting has changed, discarding analysis cache"
+
+  # Skyfocus should rerun due to the dropped analysis cache.
+  expect_log "Focusing on .\+ roots, .\+ leafs"
+
+  # New result.
+  assert_contains "value=command_line_val" ${out}
+}
+
+function test_changes_with_symlinks_are_detected() {
+  local -r pkg=${FUNCNAME[0]}
+  mkdir -p ${pkg}/subdir
+
+  echo "input" > ${pkg}/in.txt
+  ln -s in.txt ${pkg}/single.symlink
+  ln -s single.symlink ${pkg}/double.symlink
+
+  echo "subdir_input" > ${pkg}/subdir/in.txt
+  ln -s subdir ${pkg}/dir.symlink
+
+  cat > ${pkg}/BUILD <<EOF
+genrule(
+    name = "g",
+    srcs = [
+        "single.symlink",
+        "double.symlink",
+        "dir.symlink/in.txt",
+    ],
+    outs = ["out.txt"],
+    cmd = "cat \$(location single.symlink) \$(location double.symlink) \$(location dir.symlink/in.txt) > \$@",
+)
+EOF
+
+  out=$(bazel info "${PRODUCT_NAME}-genfiles")/${pkg}/out.txt
+  # Verify that Skyfocus handles the symlinks/files edges correctly, and that
+  # using the linked file in the working set should work, even though the
+  # symlinks are used as the genrule inputs.
+  bazel build //${pkg}:g --experimental_working_set=${pkg}/in.txt,${pkg}/subdir/in.txt \
+    || "expected build to succeed"
+
+  echo "a change" >> ${pkg}/in.txt
+  bazel build //${pkg}:g || fail "expected build to succeed"
+  assert_contains "a change" ${out}
+
+  echo "final change" >> ${pkg}/subdir/in.txt
+  bazel build //${pkg}:g || fail "expected build to succeed"
+  assert_contains "final change" ${out}
+
+  # Yes, this means that you symlinks that used to link to the working set
+  # can be relinked to something else, and the build will still work.
+  # Not a correctness issue.
+  mkdir -p ${pkg}/new_subdir
+  echo "new file" > ${pkg}/new_subdir/new_file
+  ln -sf new_subdir/new_file ${pkg}/single.symlink
+  bazel build //${pkg}:g || fail "expected build to succeed"
+  assert_contains "new file" ${out}
+
+  echo "new file 2" > ${pkg}/new_subdir/new_file
+  ln -sf new_subdir ${pkg}/dir.symlink
+  bazel build //${pkg}:g || fail "expected build to succeed"
+  assert_contains "new file 2" ${out}
+}
+
+function test_symlinks_as_working_set() {
+  local -r pkg=${FUNCNAME[0]}
+  mkdir -p ${pkg}/subdir
+
+  echo "input" > ${pkg}/in.txt
+  ln -s in.txt ${pkg}/single.symlink
+
+  echo "subdir_input" > ${pkg}/subdir/in.txt
+  ln -s subdir ${pkg}/dir.symlink
+
+  cat > ${pkg}/BUILD <<EOF
+genrule(
+    name = "g",
+    srcs = [
+        "single.symlink",
+        "dir.symlink/in.txt",
+    ],
+    outs = ["out.txt"],
+    cmd = "cat \$(location single.symlink) \$(location dir.symlink/in.txt) > \$@",
+)
+EOF
+
+  out=$(bazel info "${PRODUCT_NAME}-genfiles")/${pkg}/out.txt
+  bazel build //${pkg}:g --experimental_working_set=${pkg}/single.symlink,${pkg}/dir.symlink \
+    || "expected build to succeed"
+
+  echo "a change" >> ${pkg}/in.txt
+  bazel build //${pkg}:g || fail "expected build to succeed"
+  assert_contains "a change" ${out}
+
+  echo "another change" >> ${pkg}/subdir/in.txt
+  bazel build //${pkg}:g || fail "expected build to succeed"
+  assert_contains "another change" ${out}
 }
 
 run_suite "Tests for Skyfocus"

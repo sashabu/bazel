@@ -38,7 +38,6 @@ import com.google.devtools.build.lib.sandbox.SandboxHelpers;
 import com.google.devtools.build.lib.sandbox.SandboxOptions;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.worker.SandboxedWorker.WorkerSandboxOptions;
-import com.google.devtools.build.lib.worker.WorkerPoolImpl.WorkerPoolConfig;
 import com.google.devtools.common.options.OptionsBase;
 import java.io.IOException;
 import javax.annotation.Nullable;
@@ -51,7 +50,9 @@ public class WorkerModule extends BlazeModule {
 
   private WorkerFactory workerFactory;
   private AsynchronousTreeDeleter treeDeleter;
-  @VisibleForTesting WorkerPoolImpl workerPool;
+
+  WorkerPoolConfig config;
+  @VisibleForTesting WorkerPool workerPool;
   @Nullable private WorkerLifecycleManager workerLifecycleManager;
 
   @Override
@@ -159,10 +160,13 @@ public class WorkerModule extends BlazeModule {
 
     WorkerPoolConfig newConfig =
         new WorkerPoolConfig(
-            workerFactory, options.workerMaxInstances, options.workerMaxMultiplexInstances);
+            workerFactory,
+            options.useNewWorkerPool,
+            options.workerMaxInstances,
+            options.workerMaxMultiplexInstances);
 
     // If the config changed compared to the last run, we have to create a new pool.
-    if (workerPool == null || !newConfig.equals(workerPool.getWorkerPoolConfig())) {
+    if (workerPool == null || !newConfig.equals(config)) {
       shutdownPool(
           "Worker pool configuration has changed, restarting worker pool...",
           /* alwaysLog= */ true,
@@ -170,7 +174,12 @@ public class WorkerModule extends BlazeModule {
     }
 
     if (workerPool == null) {
-      workerPool = new WorkerPoolImpl(newConfig);
+      if (options.useNewWorkerPool) {
+        workerPool = new WorkerPoolImpl(newConfig);
+      } else {
+        workerPool = new WorkerPoolImplLegacy(newConfig);
+      }
+      config = newConfig;
       // If workerPool is restarted then we should recreate metrics.
       WorkerProcessMetricsCollector.instance().clear();
     }
@@ -274,5 +283,9 @@ public class WorkerModule extends BlazeModule {
       this.workerFactory.setReporter(null);
     }
     WorkerMultiplexerManager.afterCommand();
+  }
+
+  public WorkerPoolConfig getWorkerPoolConfig() {
+    return config;
   }
 }

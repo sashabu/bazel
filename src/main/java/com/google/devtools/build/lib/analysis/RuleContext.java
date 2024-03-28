@@ -83,6 +83,7 @@ import com.google.devtools.build.lib.packages.SymbolGenerator;
 import com.google.devtools.build.lib.packages.Target;
 import com.google.devtools.build.lib.packages.TargetUtils;
 import com.google.devtools.build.lib.packages.Type;
+import com.google.devtools.build.lib.packages.Types;
 import com.google.devtools.build.lib.packages.semantics.BuildLanguageOptions;
 import com.google.devtools.build.lib.skyframe.ConfiguredTargetAndData;
 import com.google.devtools.build.lib.util.FileTypeSet;
@@ -250,8 +251,8 @@ public class RuleContext extends TargetContext
   private FeatureSet computeFeatures() {
     FeatureSet pkg = rule.getPackage().getPackageArgs().features();
     FeatureSet rule =
-        attributes().has("features", Type.STRING_LIST)
-            ? FeatureSet.parse(attributes().get("features", Type.STRING_LIST))
+        attributes().has("features", Types.STRING_LIST)
+            ? FeatureSet.parse(attributes().get("features", Types.STRING_LIST))
             : FeatureSet.EMPTY;
     return FeatureSet.mergeWithGlobalFeatures(
         FeatureSet.merge(pkg, rule), getConfiguration().getDefaultFeatures());
@@ -1449,34 +1450,6 @@ public class RuleContext extends TargetContext
   }
 
   /**
-   * Returns true if {@code label} is visible from {@code prerequisite}.
-   *
-   * <p>This only computes the logic as implemented by the visibility system. The final decision
-   * whether a dependency is allowed is made by {@link PrerequisiteValidator}.
-   */
-  public static boolean isVisible(Label label, TransitiveInfoCollection prerequisite) {
-    // Check visibility attribute
-    for (PackageGroupContents specification :
-        prerequisite.getProvider(VisibilityProvider.class).getVisibility().toList()) {
-      if (specification.containsPackage(label.getPackageIdentifier())) {
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  /**
-   * Returns true if {@code rule} is visible from {@code prerequisite}.
-   *
-   * <p>This only computes the logic as implemented by the visibility system. The final decision
-   * whether a dependency is allowed is made by {@link PrerequisiteValidator}.
-   */
-  public static boolean isVisible(Rule rule, TransitiveInfoCollection prerequisite) {
-    return isVisible(rule.getLabel(), prerequisite);
-  }
-
-  /**
    * @return the set of features applicable for the current rule.
    */
   public ImmutableSet<String> getFeatures() {
@@ -1591,11 +1564,12 @@ public class RuleContext extends TargetContext
         ExecGroupCollection.Builder execGroupCollectionBuilder, AttributeMap attributes)
         throws InvalidExecGroupException {
       if (rawExecProperties == null) {
-        if (!attributes.has(RuleClass.EXEC_PROPERTIES_ATTR, Type.STRING_DICT)) {
+        if (!attributes.has(RuleClass.EXEC_PROPERTIES_ATTR, Types.STRING_DICT)) {
           rawExecProperties = ImmutableMap.of();
         } else {
           rawExecProperties =
-              ImmutableMap.copyOf(attributes.get(RuleClass.EXEC_PROPERTIES_ATTR, Type.STRING_DICT));
+              ImmutableMap.copyOf(
+                  attributes.get(RuleClass.EXEC_PROPERTIES_ATTR, Types.STRING_DICT));
         }
       }
 
@@ -1901,17 +1875,6 @@ public class RuleContext extends TargetContext
 
     public BuildConfigurationValue getConfiguration() {
       return configuration;
-    }
-
-    /**
-     * @return true if {@code rule} is visible from {@code prerequisite}.
-     *     <p>This only computes the logic as implemented by the visibility system. The final
-     *     decision whether a dependency is allowed is made by {@link PrerequisiteValidator}, who is
-     *     supposed to call this method to determine whether a dependency is allowed as per
-     *     visibility rules.
-     */
-    public boolean isVisible(TransitiveInfoCollection prerequisite) {
-      return RuleContext.isVisible(target.getAssociatedRule(), prerequisite);
     }
 
     @Nullable

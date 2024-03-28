@@ -134,17 +134,11 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
         "platforms:",
         "  //java/android/platforms:armeabi-v7a",
         "    --cpu=armeabi-v7a",
-        "    --android_cpu=armeabi-v7a",
-        "    --crosstool_top=//android/crosstool:everything",
         "  //java/android/platforms:x86",
         "    --cpu=x86",
-        "    --android_cpu=x86",
-        "    --crosstool_top=//android/crosstool:everything",
         "flags:",
-        "  --crosstool_top=//android/crosstool:everything",
         "  --cpu=armeabi-v7a",
         "    //java/android/platforms:armv7",
-        "  --crosstool_top=//android/crosstool:everything",
         "  --cpu=x86",
         "    //java/android/platforms:x86");
     setBuildLanguageOptions("--experimental_google_legacy_api");
@@ -2740,25 +2734,6 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   @Test
   public void testMainDexListWithAndroidSdk() throws Exception {
     scratch.file(
-        "sdk/BUILD",
-        "android_sdk(",
-        "    name = 'sdk',",
-        "    aapt = 'aapt',",
-        "    aapt2 = 'aapt2',",
-        "    adb = 'adb',",
-        "    aidl = 'aidl',",
-        "    android_jar = 'android.jar',",
-        "    apksigner = 'apksigner',",
-        "    dx = 'dx',",
-        "    framework_aidl = 'framework_aidl',",
-        "    main_dex_classes = 'main_dex_classes',",
-        "    main_dex_list_creator = 'main_dex_list_creator',",
-        "    proguard = 'proguard',",
-        "    shrinked_android_jar = 'shrinked_android_jar',",
-        "    zipalign = 'zipalign',",
-        "    tags = ['__ANDROID_RULES_MIGRATION__'])");
-
-    scratch.file(
         "java/a/BUILD",
         "android_binary(",
         "    name = 'a',",
@@ -2767,7 +2742,6 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
         "    multidex = 'legacy',",
         "    main_dex_list_opts = ['--hello', '--world'])");
 
-    useConfiguration("--android_sdk=//sdk:sdk");
     ConfiguredTarget a = getConfiguredTarget("//java/a:a");
     Artifact mainDexList =
         ActionsTestUtil.getFirstArtifactEndingWith(
@@ -2802,7 +2776,12 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
         "    shrinked_android_jar = 'shrinked_android_jar',",
         "    zipalign = 'zipalign',",
         "    legacy_main_dex_list_generator = '//tools/fake:generate_main_dex_list',",
-        "    tags = ['__ANDROID_RULES_MIGRATION__'])");
+        "    tags = ['__ANDROID_RULES_MIGRATION__'])",
+        "toolchain(",
+        "    name = 'sdk_toolchain',",
+        String.format("    toolchain_type = '%s',", TestConstants.ANDROID_TOOLCHAIN_TYPE_LABEL),
+        "    toolchain = ':sdk',",
+        ")");
 
     scratch.file(
         "java/a/BUILD",
@@ -2812,7 +2791,7 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
         "    manifest = 'AndroidManifest.xml',",
         "    multidex = 'legacy')");
 
-    useConfiguration("--android_sdk=//sdk:sdk");
+    useConfiguration("--extra_toolchains=//sdk:sdk_toolchain");
     ConfiguredTarget a = getConfiguredTarget("//java/a:a");
     Artifact mainDexList =
         ActionsTestUtil.getFirstArtifactEndingWith(
@@ -2828,26 +2807,7 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
 
   @Test
   public void testMainDexAaptGenerationSupported() throws Exception {
-    useConfiguration("--android_sdk=//sdk:sdk", "--noincremental_dexing");
-    scratch.file(
-        "sdk/BUILD",
-        "android_sdk(",
-        "    name = 'sdk',",
-        "    build_tools_version = '24.0.0',",
-        "    aapt = 'aapt',",
-        "    aapt2 = 'aapt2',",
-        "    adb = 'adb',",
-        "    aidl = 'aidl',",
-        "    android_jar = 'android.jar',",
-        "    apksigner = 'apksigner',",
-        "    dx = 'dx',",
-        "    framework_aidl = 'framework_aidl',",
-        "    main_dex_classes = 'main_dex_classes',",
-        "    main_dex_list_creator = 'main_dex_list_creator',",
-        "    proguard = 'proguard',",
-        "    shrinked_android_jar = 'shrinked_android_jar',",
-        "    zipalign = 'zipalign',",
-        "    tags = ['__ANDROID_RULES_MIGRATION__'])");
+    useConfiguration("--noincremental_dexing");
 
     scratch.file(
         "java/a/BUILD",

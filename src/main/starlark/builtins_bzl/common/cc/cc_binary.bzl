@@ -424,10 +424,10 @@ def _create_transitive_linking_actions(
         link_compile_output_separately,
         linking_mode,
         link_target_type,
-        pdb_file,
-        win_def_file,
         additional_linkopts,
-        additional_make_variable_substitutions):
+        additional_make_variable_substitutions,
+        link_variables,
+        additional_outputs):
     cc_compilation_outputs_with_only_objects = cc_common.create_compilation_outputs(objects = None, pic_objects = None)
     deps_cc_info = CcInfo(linking_context = deps_cc_linking_context)
     libraries_for_current_cc_linking_context = []
@@ -513,8 +513,8 @@ def _create_transitive_linking_actions(
         output_type = link_target_type,
         main_output = binary,
         never_link = True,
-        pdb_file = pdb_file,
-        win_def_file = win_def_file,
+        variables_extension = link_variables,
+        additional_outputs = additional_outputs,
     )
     cc_launcher_info = cc_internal.create_cc_launcher_info(cc_info = cc_info_without_extra_link_time_libraries, compilation_outputs = cc_compilation_outputs_with_only_objects)
     return (cc_linking_outputs, cc_launcher_info, cc_linking_context)
@@ -625,6 +625,8 @@ def cc_binary_impl(ctx, additional_linkopts, force_linkstatic = False):
     all_deps = ctx.attr.deps + semantics.get_cc_runtimes(ctx, _is_link_shared(ctx))
     compilation_context_deps = [dep[CcInfo].compilation_context for dep in all_deps if CcInfo in dep]
 
+    runtimes_copts = semantics.get_cc_runtimes_copts(ctx)
+
     additional_make_variable_substitutions = cc_helper.get_toolchain_global_make_variables(cc_toolchain)
     additional_make_variable_substitutions.update(cc_helper.get_cc_flags_make_variable(ctx, feature_configuration, cc_toolchain))
 
@@ -633,7 +635,7 @@ def cc_binary_impl(ctx, additional_linkopts, force_linkstatic = False):
         actions = ctx.actions,
         feature_configuration = feature_configuration,
         cc_toolchain = cc_toolchain,
-        user_compile_flags = cc_helper.get_copts(ctx, feature_configuration, additional_make_variable_substitutions),
+        user_compile_flags = runtimes_copts + cc_helper.get_copts(ctx, feature_configuration, additional_make_variable_substitutions),
         defines = cc_helper.defines(ctx, additional_make_variable_substitutions),
         local_defines = cc_helper.local_defines(ctx, additional_make_variable_substitutions) + cc_helper.get_local_defines_for_runfiles_lookup(ctx, ctx.attr.deps),
         system_includes = cc_helper.system_include_dirs(ctx, additional_make_variable_substitutions),
@@ -649,7 +651,9 @@ def cc_binary_impl(ctx, additional_linkopts, force_linkstatic = False):
         pic_objects = depset(precompiled_files[1]),  # pic_objects
     )
     cc_compilation_outputs = cc_common.merge_compilation_outputs(compilation_outputs = [compilation_outputs, precompiled_file_objects])
-    additional_linker_inputs = ctx.files.additional_linker_inputs
+    additional_linker_inputs = list(ctx.files.additional_linker_inputs)
+    additional_linker_outputs = []
+    link_variables = {}
 
     # Allows the dynamic library generated for code of test targets to be linked separately.
     link_compile_output_separately = ctx.attr._is_test and linking_mode == linker_mode.LINKING_DYNAMIC and cpp_config.dynamic_mode() == "DEFAULT" and ("dynamic_link_test_srcs" in ctx.features)
@@ -685,7 +689,7 @@ def cc_binary_impl(ctx, additional_linkopts, force_linkstatic = False):
     is_static_mode = linking_mode != linker_mode.LINKING_DYNAMIC
     deps_cc_linking_context = _collect_linking_context(ctx)
     generated_def_file = None
-    win_def_file = None
+
     if _is_link_shared(ctx):
         if is_windows_enabled:
             # Make copy of a list, to avoid mutating frozen values.
@@ -705,6 +709,8 @@ def cc_binary_impl(ctx, additional_linkopts, force_linkstatic = False):
                 generated_def_file = cc_helper.generate_def_file(ctx, def_parser, object_files, binary.basename)
             custom_win_def_file = ctx.file.win_def_file
             win_def_file = cc_helper.get_windows_def_file_for_linking(ctx, custom_win_def_file, generated_def_file, feature_configuration)
+            link_variables["def_file_path"] = win_def_file.path
+            additional_linker_inputs.append(win_def_file)
 
     use_pic = _use_pic(ctx, cc_toolchain, cpp_config, feature_configuration)
 
@@ -713,6 +719,12 @@ def cc_binary_impl(ctx, additional_linkopts, force_linkstatic = False):
     pdb_file = None
     if cc_common.is_enabled(feature_configuration = feature_configuration, feature_name = "generate_pdb_file"):
         pdb_file = ctx.actions.declare_file(_strip_extension(binary) + ".pdb", sibling = binary)
+        additional_linker_outputs.append(pdb_file)
+
+    linkmap = None
+    if cc_common.is_enabled(feature_configuration = feature_configuration, feature_name = "generate_linkmap"):
+        linkmap = ctx.actions.declare_file(binary.basename + ".map", sibling = binary)
+        additional_linker_outputs.append(linkmap)
 
     extra_link_time_libraries = deps_cc_linking_context.extra_link_time_libraries()
     linker_inputs_extra = depset()
@@ -734,10 +746,10 @@ def cc_binary_impl(ctx, additional_linkopts, force_linkstatic = False):
         link_compile_output_separately,
         linking_mode,
         link_target_type,
-        pdb_file,
-        win_def_file,
         additional_linkopts,
         additional_make_variable_substitutions,
+        link_variables,
+        additional_linker_outputs,
     )
 
     cc_linking_outputs_binary_library = cc_linking_outputs_binary.library_to_link
@@ -830,6 +842,8 @@ def cc_binary_impl(ctx, additional_linkopts, force_linkstatic = False):
         output_groups["pdb_file"] = depset([pdb_file])
     if generated_def_file != None:
         output_groups["def_file"] = depset([generated_def_file])
+    if linkmap:
+        output_groups["linkmap"] = depset([linkmap])
 
     if cc_linking_outputs_binary_library != None:
         # For consistency and readability.

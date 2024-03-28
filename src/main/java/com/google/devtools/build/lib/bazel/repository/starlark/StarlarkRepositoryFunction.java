@@ -21,6 +21,7 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Table;
+import com.google.common.util.concurrent.Uninterruptibles;
 import com.google.devtools.build.lib.analysis.BlazeDirectories;
 import com.google.devtools.build.lib.analysis.RuleDefinition;
 import com.google.devtools.build.lib.bazel.repository.RepositoryResolvedEvent;
@@ -38,6 +39,7 @@ import com.google.devtools.build.lib.pkgcache.PathPackageLocator;
 import com.google.devtools.build.lib.profiler.Profiler;
 import com.google.devtools.build.lib.profiler.ProfilerTask;
 import com.google.devtools.build.lib.profiler.SilentCloseable;
+import com.google.devtools.build.lib.repository.RepositoryFetchProgress;
 import com.google.devtools.build.lib.rules.repository.NeedsSkyframeRestartException;
 import com.google.devtools.build.lib.rules.repository.RepoRecordedInput;
 import com.google.devtools.build.lib.rules.repository.RepositoryDirectoryValue;
@@ -56,6 +58,7 @@ import com.google.devtools.build.skyframe.SkyFunctionException.Transience;
 import com.google.devtools.build.skyframe.SkyKey;
 import java.io.IOException;
 import java.util.Map;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import javax.annotation.Nullable;
@@ -161,7 +164,20 @@ public final class StarlarkRepositoryFunction extends RepositoryFunction {
       // restart, and need to send over a fresh Environment.
       state.delegateEnvQueue.put(env);
     }
-    switch (state.signalQueue.take()) {
+    Signal signal;
+    try {
+      signal = state.signalQueue.take();
+    } catch (InterruptedException e) {
+      // This means that we caught a Ctrl-C. Make sure to close the state object to interrupt the
+      // worker thread, wait for it to finish, and then propagate the InterruptedException.
+      state.close();
+      signal = Uninterruptibles.takeUninterruptibly(state.signalQueue);
+      // The call to Uninterruptibles.takeUninterruptibly() above may set the thread interrupted
+      // status if it suppressed an InterruptedException, so we clear it again.
+      Thread.interrupted();
+      throw new InterruptedException();
+    }
+    switch (signal) {
       case RESTART:
         return null;
       case DONE:
@@ -174,18 +190,15 @@ public final class StarlarkRepositoryFunction extends RepositoryFunction {
           Throwables.throwIfUnchecked(e.getCause());
           throw new IllegalStateException(
               "unexpected exception type: " + e.getClass(), e.getCause());
-        } finally {
-          // Make sure we interrupt the worker thread if work on the Skyframe thread were cut short
-          // for any reason.
-          state.close();
-          try {
-            // Synchronously wait for the worker thread to finish any remaining work.
-            workerFuture.get();
-          } catch (ExecutionException e) {
-            // When this happens, we either already dealt with the exception (see `catch` clause
-            // above), or we're in the middle of propagating an InterruptedException in which case
-            // we don't care about the result of execution anyway.
-          }
+        } catch (CancellationException e) {
+          // This can only happen if the state object was invalidated due to memory pressure, in
+          // which case we can simply reattempt the fetch.
+          env.getListener()
+              .post(
+                  RepositoryFetchProgress.ongoing(
+                      RepositoryName.createUnvalidated(rule.getName()),
+                      "fetch interrupted due to memory pressure; restarting."));
+          return fetch(rule, outputDirectory, directories, env, recordedInputValues, key);
         }
     }
     // TODO(wyv): use a switch expression above instead and remove this.
@@ -363,7 +376,18 @@ public final class StarlarkRepositoryFunction extends RepositoryFunction {
           new IOException(rule + " must create a directory"), Transience.TRANSIENT);
     }
 
+    // Make sure the fetched repo has a boundary file.
     if (!WorkspaceFileHelper.isValidRepoRoot(outputDirectory)) {
+      if (outputDirectory.isSymbolicLink()) {
+        // The created repo is actually just a symlink to somewhere else (think local_repository).
+        // In this case, we shouldn't try to create the repo boundary file ourselves, but report an
+        // error instead.
+        throw new RepositoryFunctionException(
+            new IOException(
+                "No MODULE.bazel, REPO.bazel, or WORKSPACE file found in " + outputDirectory),
+            Transience.TRANSIENT);
+      }
+      // Otherwise, we can just create an empty REPO.bazel file.
       try {
         FileSystemUtils.createEmptyFile(outputDirectory.getRelative(LabelConstants.REPO_FILE_NAME));
         if (starlarkSemantics.getBool(BuildLanguageOptions.ENABLE_WORKSPACE)) {

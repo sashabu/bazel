@@ -90,6 +90,14 @@ public class MockPlatformSupport {
         "    constraint_setting = ':cpu',",
         ")",
         "constraint_value(",
+        "    name = 'riscv32',",
+        "    constraint_setting = ':cpu',",
+        ")",
+        "constraint_value(",
+        "    name = 'riscv64',",
+        "    constraint_setting = ':cpu',",
+        ")",
+        "constraint_value(",
         "    name = 's390x',",
         "    constraint_setting = ':cpu',",
         ")");
@@ -171,6 +179,13 @@ public class MockPlatformSupport {
         // Regardless of the actual machine the tests are run on, hardcode everything to a single
         // default value for simplicity.
         "        '" + constraintsPackageRoot + "cpu:x86_64',",
+        "        '" + constraintsPackageRoot + "os:linux',",
+        "    ],",
+        ")",
+        "platform(",
+        "     name = 'piii',",
+        "     constraint_values = [",
+        "        '" + constraintsPackageRoot + "cpu:x86_32',",
         "        '" + constraintsPackageRoot + "os:linux',",
         "    ],",
         ")");

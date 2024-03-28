@@ -37,7 +37,6 @@ import com.google.devtools.build.lib.cmdline.PackageIdentifier;
 import com.google.devtools.build.lib.cmdline.RepositoryName;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.packages.util.Crosstool.CcToolchainConfig;
-import com.google.devtools.build.lib.packages.util.MockCcSupport;
 import com.google.devtools.build.lib.testutil.TestConstants;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import com.google.devtools.build.lib.vfs.ModifiedFileSet;
@@ -172,7 +171,7 @@ public class CcCommonTest extends BuildViewTestCase {
         .setupCcToolchainConfig(
             mockToolsConfig,
             CcToolchainConfig.builder().withFeatures(CppRuleClasses.SUPPORTS_DYNAMIC_LINKER));
-    useConfiguration("--cpu=k8");
+    useConfiguration("--platforms=" + TestConstants.PLATFORM_LABEL);
     ConfiguredTarget archiveInSrcsTest =
         scratchConfiguredTarget(
             "archive_in_srcs",
@@ -190,7 +189,7 @@ public class CcCommonTest extends BuildViewTestCase {
 
   private Iterable<Artifact> getLinkerInputs(ConfiguredTarget target) {
     Artifact executable = getExecutable(target);
-    CppLinkAction linkAction = (CppLinkAction) getGeneratingAction(executable);
+    SpawnAction linkAction = (SpawnAction) getGeneratingAction(executable);
     return linkAction.getInputs().toList();
   }
 
@@ -225,7 +224,7 @@ public class CcCommonTest extends BuildViewTestCase {
                 .isEmpty())
         .isTrue();
     Artifact staticallyDotA = getFilesToBuild(statically).getSingleton();
-    assertThat(getGeneratingAction(staticallyDotA)).isInstanceOf(CppLinkAction.class);
+    assertThat(getGeneratingAction(staticallyDotA).getMnemonic()).isEqualTo("CppArchive");
     PathFragment dotAPath = staticallyDotA.getExecPath();
     assertThat(dotAPath.getPathString()).endsWith(STATIC_LIB);
   }
@@ -323,7 +322,7 @@ public class CcCommonTest extends BuildViewTestCase {
         "          srcs=['bin.c'])");
 
     ConfiguredTarget target = getConfiguredTarget("//test:bin");
-    CppLinkAction action = (CppLinkAction) getGeneratingAction(getExecutable(target));
+    SpawnAction action = (SpawnAction) getGeneratingAction(getExecutable(target));
     for (Artifact input : action.getInputs().toList()) {
       String name = input.getFilename();
       assertThat(!CppFileTypes.ARCHIVE.matches(name) && !CppFileTypes.PIC_ARCHIVE.matches(name))
@@ -345,7 +344,7 @@ public class CcCommonTest extends BuildViewTestCase {
         "cc_binary(name='bin', srcs=['bin.c'])");
 
     ConfiguredTarget target = getConfiguredTarget("//test:bin");
-    CppLinkAction action = (CppLinkAction) getGeneratingAction(getExecutable(target));
+    SpawnAction action = (SpawnAction) getGeneratingAction(getExecutable(target));
     for (Artifact input : action.getInputs().toList()) {
       String name = input.getFilename();
       assertThat(!CppFileTypes.ARCHIVE.matches(name) && !CppFileTypes.PIC_ARCHIVE.matches(name))
@@ -360,7 +359,7 @@ public class CcCommonTest extends BuildViewTestCase {
         .setupCcToolchainConfig(
             mockToolsConfig, CcToolchainConfig.builder().withFeatures(CppRuleClasses.SUPPORTS_PIC));
     invalidatePackages();
-    useConfiguration("--cpu=k8", "--save_temps");
+    useConfiguration("--platforms=" + TestConstants.PLATFORM_LABEL, "--save_temps");
     scratch.file(
         "ananas/BUILD",
         "cc_library(name='ananas',",
@@ -448,7 +447,7 @@ public class CcCommonTest extends BuildViewTestCase {
             CcToolchainConfig.builder()
                 .withFeatures(CppRuleClasses.SUPPORTS_PIC, CppRuleClasses.PIC));
     invalidatePackages();
-    useConfiguration("--cpu=k8");
+    useConfiguration("--platforms=" + TestConstants.PLATFORM_LABEL);
     scratch.file("a/BUILD", "cc_library(name='preprocess', srcs=['preprocess.S'])");
     List<String> argv = getCppCompileAction("//a:preprocess").getArguments();
     assertThat(argv).contains("-fPIC");
@@ -562,7 +561,11 @@ public class CcCommonTest extends BuildViewTestCase {
         .setupCcToolchainConfig(
             mockToolsConfig,
             CcToolchainConfig.builder().withFeatures(CppRuleClasses.PER_OBJECT_DEBUG_INFO));
-    useConfiguration("--cpu=k8", "--build_test_dwp", "--dynamic_mode=off", "--fission=yes");
+    useConfiguration(
+        "--platforms=" + TestConstants.PLATFORM_LABEL,
+        "--build_test_dwp",
+        "--dynamic_mode=off",
+        "--fission=yes");
     ConfiguredTarget target =
         scratchConfiguredTarget(
             "mypackage", "mytest", "cc_test(name = 'mytest', srcs = ['mytest.cc'])");
@@ -828,10 +831,9 @@ public class CcCommonTest extends BuildViewTestCase {
         "    linkopts=['-Wl,@$(location a.lds)'],",
         "    deps=['a.lds'])");
     ConfiguredTarget target = getConfiguredTarget("//a:bin");
-    CppLinkAction action =
-        (CppLinkAction) getGeneratingAction(getFilesToBuild(target).getSingleton());
-    assertThat(MockCcSupport.getLinkopts(action.getLinkCommandLineForTesting()))
-        .containsExactly(
+    SpawnAction action = (SpawnAction) getGeneratingAction(getFilesToBuild(target).getSingleton());
+    assertThat(action.getArguments())
+        .contains(
             String.format(
                 "-Wl,@%s/a/a.lds",
                 getTargetConfiguration()
@@ -865,8 +867,7 @@ public class CcCommonTest extends BuildViewTestCase {
         "    linkopts=['-Wl,@$(location a.lds)'],",
         "    deps=['a.lds'])");
     ConfiguredTarget target = getConfiguredTarget("//a:bin");
-    CppLinkAction action =
-        (CppLinkAction) getGeneratingAction(getFilesToBuild(target).getSingleton());
+    SpawnAction action = (SpawnAction) getGeneratingAction(getFilesToBuild(target).getSingleton());
     NestedSet<Artifact> linkInputs = action.getInputs();
     assertThat(ActionsTestUtil.baseArtifactNames(linkInputs)).contains("a.lds");
   }
@@ -1005,7 +1006,7 @@ public class CcCommonTest extends BuildViewTestCase {
                     CppActionNames.CPP_LINK_STATIC_LIBRARY,
                     CppActionNames.CPP_COMPILE,
                     CppActionNames.CPP_LINK_NODEPS_DYNAMIC_LIBRARY));
-    useConfiguration("--cpu=k8");
+    useConfiguration("--platforms=" + TestConstants.PLATFORM_LABEL);
 
     scratch.file("x/BUILD", "cc_library(name = 'foo', srcs = ['a.cc'])");
     scratch.file("x/a.cc");
@@ -1059,7 +1060,7 @@ public class CcCommonTest extends BuildViewTestCase {
                     CppActionNames.CPP_LINK_STATIC_LIBRARY,
                     CppActionNames.CPP_COMPILE,
                     CppActionNames.CPP_LINK_NODEPS_DYNAMIC_LIBRARY));
-    useConfiguration("--force_pic", "--cpu=k8");
+    useConfiguration("--force_pic", "--platforms=" + TestConstants.PLATFORM_LABEL);
 
     scratch.file("x/BUILD", "cc_library(name = 'foo', srcs = ['a.cc'])");
     scratch.file("x/a.cc");
@@ -1089,7 +1090,7 @@ public class CcCommonTest extends BuildViewTestCase {
                     CppActionNames.CPP_LINK_STATIC_LIBRARY,
                     CppActionNames.CPP_COMPILE,
                     CppActionNames.CPP_LINK_NODEPS_DYNAMIC_LIBRARY));
-    useConfiguration("--cpu=k8", "--compilation_mode=opt");
+    useConfiguration("--platforms=" + TestConstants.PLATFORM_LABEL, "--compilation_mode=opt");
 
     scratch.file("x/BUILD", "cc_library(name = 'foo', srcs = ['a.cc'])");
     scratch.file("x/a.cc");
@@ -1118,7 +1119,7 @@ public class CcCommonTest extends BuildViewTestCase {
                     CppActionNames.CPP_LINK_STATIC_LIBRARY,
                     CppActionNames.CPP_COMPILE,
                     CppActionNames.CPP_LINK_NODEPS_DYNAMIC_LIBRARY));
-    useConfiguration("--cpu=k8", "--compilation_mode=opt");
+    useConfiguration("--platforms=" + TestConstants.PLATFORM_LABEL, "--compilation_mode=opt");
 
     scratch.file("x/BUILD", "cc_library(name = 'foo', srcs = ['a.cc'])");
     scratch.file("x/a.cc");
@@ -1327,5 +1328,26 @@ public class CcCommonTest extends BuildViewTestCase {
             "          link_extra_lib = ':empty_lib')");
     List<String> artifactNames = baseArtifactNames(getLinkerInputs(target));
     assertThat(artifactNames).doesNotContain("liblink_extra_lib.a");
+  }
+
+  @Test
+  public void testGenerateLinkMap() throws Exception {
+    AnalysisMock.get()
+        .ccSupport()
+        .setupCcToolchainConfig(
+            mockToolsConfig,
+            CcToolchainConfig.builder().withFeatures(CppRuleClasses.GENERATE_LINKMAP_FEATURE_NAME));
+    useConfiguration("--cpu=k8");
+    ConfiguredTarget generateLinkMapTest =
+        scratchConfiguredTarget(
+            "generate_linkmap",
+            "generate_linkmap_test",
+            "cc_binary(name = 'generate_linkmap_test',",
+            "          features = ['generate_linkmap'],",
+            "          srcs = ['generate_linkmap_test.cc'],",
+            "          )");
+    Iterable<String> temps =
+        ActionsTestUtil.baseArtifactNames(getOutputGroup(generateLinkMapTest, "linkmap"));
+    assertThat(temps).containsExactly("generate_linkmap_test.map");
   }
 }

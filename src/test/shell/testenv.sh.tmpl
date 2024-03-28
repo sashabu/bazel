@@ -288,6 +288,11 @@ common --enable_bzlmod
 # Verify compatibility before the flip (https://github.com/bazelbuild/bazel/issues/12821)
 common --nolegacy_external_runfiles
 
+# Support JDK 21, data dependencies that get compiled and used tools need to be
+# run with 21 runtime.
+build --java_runtime_version=21
+build --tool_java_runtime_version=21
+
 ${EXTRA_BAZELRC:-}
 EOF
 
@@ -444,6 +449,22 @@ platform(
     constraint_values = [
         "@platforms//os:android",
         "@platforms//cpu:armv7",
+    ],
+)
+
+platform(
+    name = "armeabi-v7a",
+    constraint_values = [
+        "@platforms//os:android",
+        "@platforms//cpu:armv7",
+    ],
+)
+
+platform(
+    name = "x86",
+    constraint_values = [
+        "@platforms//os:android",
+        "@platforms//cpu:x86_32",
     ],
 )
 EOF

@@ -24,8 +24,8 @@ def _remote_android_tools_extensions_impl(_ctx):
     )
     http_jar(
         name = "android_gmaven_r8",
-        sha256 = "a1d7f902d56cfa8d1e8cd64aa250e63549359fcd096eb793286787b1a1e76db1",
-        url = "https://maven.google.com/com/android/tools/r8/8.2.42/r8-8.2.42.jar",
+        sha256 = "59753e70a74f918389cc87f1b7d66b5c0862932559167425708ded159e3de439",
+        url = "https://maven.google.com/com/android/tools/r8/8.3.37/r8-8.3.37.jar",
     )
 
 remote_android_tools_extensions = module_extension(
@@ -38,6 +38,11 @@ def _android_external_repository_impl(repo_ctx):
         """
 alias(
   name  = "has_androidsdk",
+  actual = "%s",
+  visibility = ["//visibility:public"],
+)
+alias(
+  name  = "sdk",
   actual = "%s",
   visibility = ["//visibility:public"],
 )
@@ -58,6 +63,7 @@ alias(
 )
 """ % (
             repo_ctx.attr.has_androidsdk,
+            repo_ctx.attr.sdk,
             repo_ctx.attr.dx_jar_import,
             repo_ctx.attr.android_sdk_for_testing,
             repo_ctx.attr.android_ndk_for_testing,
@@ -70,6 +76,7 @@ android_external_repository = repository_rule(
     implementation = _android_external_repository_impl,
     attrs = {
         "has_androidsdk": attr.label(default = "@bazel_tools//tools/android:always_false"),
+        "sdk": attr.label(default = "@bazel_tools//tools/android:poison_pill_android_sdk"),
         "dx_jar_import": attr.label(default = "@bazel_tools//tools/android:no_android_sdk_repository_error"),
         "android_sdk_for_testing": attr.label(default = "@bazel_tools//tools/android:empty"),
         "android_ndk_for_testing": attr.label(default = "@bazel_tools//tools/android:empty"),
@@ -90,6 +97,7 @@ def _android_sdk_proxy_extensions_impl(module_ctx):
     kwargs = {}
     if module.tags.configure:
         kwargs["has_androidsdk"] = module.tags.configure[0].has_androidsdk
+        kwargs["sdk"] = module.tags.configure[0].sdk
         kwargs["dx_jar_import"] = module.tags.configure[0].dx_jar_import
         kwargs["android_sdk_for_testing"] = module.tags.configure[0].android_sdk_for_testing
         kwargs["android_ndk_for_testing"] = module.tags.configure[0].android_ndk_for_testing
@@ -104,6 +112,7 @@ android_sdk_proxy_extensions = module_extension(
     tag_classes = {
         "configure": tag_class(attrs = {
             "has_androidsdk": attr.label(default = "@bazel_tools//tools/android:always_false"),
+            "sdk": attr.label(default = "@bazel_tools//tools/android:poison_pill_android_sdk"),
             "dx_jar_import": attr.label(default = "@bazel_tools//tools/android:no_android_sdk_repository_error"),
             "android_sdk_for_testing": attr.label(default = "@bazel_tools//tools/android:empty"),
             "android_ndk_for_testing": attr.label(default = "@bazel_tools//tools/android:empty"),

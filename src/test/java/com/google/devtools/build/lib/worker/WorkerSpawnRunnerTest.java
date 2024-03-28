@@ -15,7 +15,7 @@
 package com.google.devtools.build.lib.worker;
 
 import static com.google.common.truth.Truth.assertThat;
-import static com.google.devtools.build.lib.worker.TestUtils.createWorkerKey;
+import static com.google.devtools.build.lib.worker.WorkerTestUtils.createWorkerKey;
 import static org.junit.Assert.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
@@ -65,13 +65,11 @@ import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.lib.vfs.Root;
 import com.google.devtools.build.lib.vfs.RootedPath;
 import com.google.devtools.build.lib.vfs.inmemoryfs.InMemoryFileSystem;
-import com.google.devtools.build.lib.worker.WorkerPoolImpl.WorkerPoolConfig;
 import com.google.devtools.build.lib.worker.WorkerProtocol.WorkRequest;
 import com.google.devtools.build.lib.worker.WorkerProtocol.WorkResponse;
 import java.io.IOException;
 import java.util.Optional;
 import java.util.concurrent.Semaphore;
-import org.apache.commons.pool2.PooledObject;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
@@ -112,24 +110,6 @@ public class WorkerSpawnRunnerTest {
     when(spawn.getLocalResources()).thenReturn(ResourceSet.createWithRamCpu(100, 1));
     when(resourceManager.acquireResources(any(), any(), any())).thenReturn(resourceHandle);
     when(resourceHandle.getWorker()).thenReturn(worker);
-  }
-
-  private WorkerPoolImpl createWorkerPool() {
-    return new WorkerPoolImpl(
-        new WorkerPoolConfig(
-            new WorkerFactory(fs.getPath("/workerBase"), options) {
-              @Override
-              public Worker create(WorkerKey key) {
-                return worker;
-              }
-
-              @Override
-              public boolean validateObject(WorkerKey key, PooledObject<Worker> p) {
-                return true;
-              }
-            },
-            ImmutableList.of(),
-            ImmutableList.of()));
   }
 
   @Test
@@ -173,7 +153,7 @@ public class WorkerSpawnRunnerTest {
             new SandboxHelpers(),
             execRoot,
             ImmutableList.of(),
-            createWorkerPool(),
+            WorkerTestUtils.createTestWorkerPool(worker),
             reporter,
             localEnvProvider,
             /* binTools= */ null,
@@ -576,7 +556,7 @@ public class WorkerSpawnRunnerTest {
         new SandboxHelpers(),
         fs.getPath("/execRoot"),
         ImmutableList.of(),
-        createWorkerPool(),
+        WorkerTestUtils.createTestWorkerPool(worker),
         reporter,
         localEnvProvider,
         /* binTools= */ null,

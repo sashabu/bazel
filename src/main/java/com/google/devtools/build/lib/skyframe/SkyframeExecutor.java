@@ -16,6 +16,8 @@ package com.google.devtools.build.lib.skyframe;
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.common.base.Preconditions.checkState;
+import static com.google.common.base.Throwables.throwIfInstanceOf;
+import static com.google.common.base.Throwables.throwIfUnchecked;
 import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.common.collect.ImmutableMap.toImmutableMap;
 import static com.google.common.collect.ImmutableSet.toImmutableSet;
@@ -24,7 +26,6 @@ import static com.google.devtools.build.lib.skyframe.ArtifactConflictFinder.ACTI
 
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
-import com.google.auto.value.AutoValue;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Functions;
 import com.google.common.base.Joiner;
@@ -462,11 +463,10 @@ public abstract class SkyframeExecutor implements WalkableGraphFactory {
   private ImmutableSet<Path> ignoredPaths = ImmutableSet.of();
 
   Duration sourceDiffCheckingDuration = Duration.ofSeconds(-1L);
-  private boolean clearNestedSetAfterActionExecution = false;
 
   private ImmutableSet<String> activeWorkingSet = ImmutableSet.of();
 
-  protected ImmutableSet<RootedPath> skyfocusVerificationSet = ImmutableSet.of();
+  protected ImmutableSet<SkyKey> skyfocusVerificationSet = ImmutableSet.of();
 
   final class PathResolverFactoryImpl implements PathResolverFactory {
     @Override
@@ -809,8 +809,7 @@ public abstract class SkyframeExecutor implements WalkableGraphFactory {
         directories,
         tsgm::get,
         bugReporter,
-        this::getConsumedArtifactsTracker,
-        this::clearingNestedSetAfterActionExecution);
+        this::getConsumedArtifactsTracker);
   }
 
   protected SkyFunction newCollectPackagesUnderDirectoryFunction(BlazeDirectories directories) {
@@ -895,8 +894,9 @@ public abstract class SkyframeExecutor implements WalkableGraphFactory {
         return checkNotNull(result.get(key), "%s %s", result, key);
       }
       ErrorInfo errorInfo = checkNotNull(result.getError(key), "%s %s", key, result);
-      Throwables.propagateIfPossible(errorInfo.getException(), EnvironmentalExecException.class);
       if (errorInfo.getException() != null) {
+        throwIfInstanceOf(errorInfo.getException(), EnvironmentalExecException.class);
+        throwIfUnchecked(errorInfo.getException());
         throw new IllegalStateException(errorInfo.getException());
       }
       throw new IllegalStateException(errorInfo.toString());
@@ -1085,14 +1085,6 @@ public abstract class SkyframeExecutor implements WalkableGraphFactory {
     return tracksStateForIncrementality()
         ? GlobbingStrategy.SKYFRAME_HYBRID
         : GlobbingStrategy.NON_SKYFRAME;
-  }
-
-  private boolean clearingNestedSetAfterActionExecution() {
-    return clearNestedSetAfterActionExecution;
-  }
-
-  public void setClearNestedSetAfterActionExecution(boolean value) {
-    this.clearNestedSetAfterActionExecution = value;
   }
 
   /**
@@ -1368,7 +1360,7 @@ public abstract class SkyframeExecutor implements WalkableGraphFactory {
     activeWorkingSet = workingSet;
   }
 
-  public void setSkyfocusVerificationSet(ImmutableSet<RootedPath> skyfocusVerificationSet) {
+  public void setSkyfocusVerificationSet(ImmutableSet<SkyKey> skyfocusVerificationSet) {
     this.skyfocusVerificationSet = skyfocusVerificationSet;
   }
 
@@ -2094,7 +2086,7 @@ public abstract class SkyframeExecutor implements WalkableGraphFactory {
       }
     }
 
-    return new AutoValue_SkyframeExecutor_ConfigureTargetsResult(
+    return new ConfigureTargetsResult(
         result,
         configuredTargets.build(),
         aspects.buildOrThrow(),
@@ -2114,18 +2106,12 @@ public abstract class SkyframeExecutor implements WalkableGraphFactory {
   }
 
   /** Result of a call to {@link #configureTargets}. */
-  @AutoValue
-  protected abstract static class ConfigureTargetsResult {
-    public abstract EvaluationResult<ActionLookupValue> evaluationResult();
-
-    public abstract ImmutableSet<ConfiguredTarget> configuredTargets();
-
-    public abstract ImmutableMap<AspectKey, ConfiguredAspect> aspects();
-
-    public abstract ImmutableList<TargetAndConfiguration> targetsWithConfiguration();
-
-    public abstract PackageRoots packageRoots();
-  }
+  protected record ConfigureTargetsResult(
+      EvaluationResult<ActionLookupValue> evaluationResult,
+      ImmutableSet<ConfiguredTarget> configuredTargets,
+      ImmutableMap<AspectKey, ConfiguredAspect> aspects,
+      ImmutableList<TargetAndConfiguration> targetsWithConfiguration,
+      PackageRoots packageRoots) {}
 
   /** Returns a map of collected package names to root paths. */
   private ImmutableMap<PackageIdentifier, Root> collectPackageRoots() {
@@ -3578,17 +3564,36 @@ public abstract class SkyframeExecutor implements WalkableGraphFactory {
       return;
     }
 
-    Set<RootedPath> intersection = new TreeSet<>();
-    for (SkyKey k : diff.changedKeysWithoutNewValues()) {
-      if (skyfocusVerificationSet.contains(k)) {
-        intersection.add((RootedPath) k);
-      }
-    }
-    for (SkyKey k : diff.changedKeysWithNewValues().keySet()) {
-      if (skyfocusVerificationSet.contains(k)) {
-        intersection.add((RootedPath) k);
-      }
-    }
+    Set<String> intersection = new TreeSet<>();
+    Consumer<SkyKey> maybeAddToIntersection =
+        (SkyKey k) -> {
+          if (skyfocusVerificationSet.contains(k)) {
+            @Nullable RootedPath rp;
+            // TODO: b/300214667 - switch to pattern matching when JDK 21 support lands.
+            if (k instanceof RootedPath) {
+              rp = (RootedPath) k;
+            } else if (k instanceof DirectoryListingStateValue.Key) {
+              rp = ((DirectoryListingStateValue.Key) k).argument();
+            } else {
+              throw new IllegalStateException(
+                  "Unhandled key type in verification set: " + k.getCanonicalName());
+            }
+
+            if (rp != null) {
+              // RootedPath#toString() prints square brackets around the components, but we don't
+              // want that.
+              StringBuilder path = new StringBuilder();
+              path.append(rp.getRoot());
+              path.append(FileSystems.getDefault().getSeparator());
+              path.append(rp.getRootRelativePath());
+              intersection.add(path.toString());
+            }
+          }
+        };
+
+    diff.changedKeysWithoutNewValues().forEach(maybeAddToIntersection);
+    diff.changedKeysWithNewValues().keySet().forEach(maybeAddToIntersection);
+
     if (intersection.isEmpty()) {
       return;
     }
@@ -3598,12 +3603,8 @@ public abstract class SkyframeExecutor implements WalkableGraphFactory {
         "Skyfocus detected changes outside of the working set. These files/directories must be"
             + " added to the working set.");
     message.append("\n");
-    for (RootedPath rp : intersection) {
-      // RootedPath#toString() prints square brackets around the components, but we don't want
-      // that.
-      message.append(rp.getRoot());
-      message.append(FileSystems.getDefault().getSeparator());
-      message.append(rp.getRootRelativePath());
+    for (String path : intersection) {
+      message.append(path);
       message.append("\n");
     }
 

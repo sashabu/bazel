@@ -95,7 +95,7 @@ public enum LinkBuildVariables {
     return variableName;
   }
 
-  public static CcToolchainVariables setupVariables(
+  public static CcToolchainVariables.Builder setupVariables(
       boolean isUsingLinkerNotArchiver,
       PathFragment binDirectoryPath,
       String outputFile,
@@ -114,13 +114,12 @@ public enum LinkBuildVariables {
       String interfaceLibraryOutput,
       PathFragment ltoOutputRootPrefix,
       PathFragment ltoObjRootPrefix,
-      String defFile,
       FdoContext fdoContext,
       NestedSet<String> runtimeLibrarySearchDirectories,
       SequenceBuilder librariesToLink,
       NestedSet<String> librarySearchDirectories,
       boolean addIfsoRelatedVariables)
-      throws EvalException, InterruptedException {
+      throws EvalException {
     CcToolchainVariables.Builder buildVariables =
         CcToolchainVariables.builder(ccToolchainProvider.getBuildVars());
     CppConfiguration cppConfiguration = ccToolchainProvider.getCppConfiguration();
@@ -244,10 +243,6 @@ public enum LinkBuildVariables {
           shouldGenerateInterfaceLibrary ? interfaceLibraryOutput : "ignored");
     }
 
-    if (defFile != null) {
-      buildVariables.addStringVariable(DEF_FILE_PATH.getVariableName(), defFile);
-    }
-
     if (featureConfiguration.isEnabled(CppRuleClasses.FDO_INSTRUMENT)) {
       Preconditions.checkArgument(fdoContext.getBranchFdoProfile() == null);
       String fdoInstrument = cppConfiguration.getFdoInstrument();
@@ -269,28 +264,13 @@ public enum LinkBuildVariables {
           PROPELLER_OPTIMIZE_LD_PATH.getVariableName(),
           fdoContext.getPropellerOptimizeInputFile().getLdArtifact().getExecPathString());
     }
-    Iterable<String> userLinkFlagsWithLtoIndexingIfNeeded;
-    if (!isLtoIndexing || cppConfiguration.useStandaloneLtoIndexingCommandLines()) {
-      userLinkFlagsWithLtoIndexingIfNeeded = userLinkFlags;
-    } else {
-      ImmutableList.Builder<String> opts = ImmutableList.builder();
-      opts.addAll(userLinkFlags);
-      opts.addAll(
-          featureConfiguration.getCommandLine(
-              CppActionNames.LTO_INDEXING, buildVariables.build(), /* expander= */ null));
-      opts.addAll(cppConfiguration.getLtoIndexOptions());
-      userLinkFlagsWithLtoIndexingIfNeeded = opts.build();
-    }
-
     // For now, silently ignore linkopts if this is a static library
-    userLinkFlagsWithLtoIndexingIfNeeded =
-        isUsingLinkerNotArchiver ? userLinkFlagsWithLtoIndexingIfNeeded : ImmutableList.of();
+    userLinkFlags = isUsingLinkerNotArchiver ? userLinkFlags : ImmutableList.of();
 
     buildVariables.addStringSequenceVariable(
         LinkBuildVariables.USER_LINK_FLAGS.getVariableName(),
-        removePieIfCreatingSharedLibrary(
-            isCreatingSharedLibrary, userLinkFlagsWithLtoIndexingIfNeeded));
-    return buildVariables.build();
+        removePieIfCreatingSharedLibrary(isCreatingSharedLibrary, userLinkFlags));
+    return buildVariables;
   }
 
   private static Iterable<String> removePieIfCreatingSharedLibrary(
