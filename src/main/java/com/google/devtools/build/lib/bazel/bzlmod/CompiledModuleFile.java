@@ -104,8 +104,8 @@ public record CompiledModuleFile(
           }
           error(
               node.getStartLocation(),
-              "the `module_import` directive MUST be called with exactly one positional "
-                  + "argument that is a string literal");
+              "the `include` directive MUST be called with exactly one positional argument that "
+                  + "is a string literal");
           return;
         }
         super.visit(node);

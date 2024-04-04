@@ -564,7 +564,7 @@ public class ModuleFileFunctionTest extends FoundationTestCase {
             evaluationContext);
     assertThat(result.hasError()).isTrue();
     assertThat(result.getError().toString())
-        .contains("but they can only be used in the root module");
+        .contains("but it can only be used in the root module");
   }
 
   @Test
