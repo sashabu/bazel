@@ -254,17 +254,10 @@ public final class VendorCommand implements BlazeCommand {
 
     Set<SkyKey> targetsSkyKeys = new HashSet<>();
     for (String target : targets) {
-      Label label;
-      try{
-        label = Label.parseCanonical(target);
-      } catch (LabelSyntaxException e) {
-        return createFailedBlazeCommandResult(
-            env.getReporter(), "Invalid target label for " + target + ": " + e.getMessage());
-      }
       ConfiguredTargetKey targetKey =
           ConfiguredTargetKey.builder()
               .setConfigurationKey(env.getSkyframeBuildView().getBuildConfiguration().getKey())
-              .setLabel(label)
+              .setLabel(Label.parseCanonicalUnchecked(target))
               .build();
       targetsSkyKeys.add(targetKey);
     }
