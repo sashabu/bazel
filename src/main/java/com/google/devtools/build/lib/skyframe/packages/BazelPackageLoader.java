@@ -24,6 +24,7 @@ import com.google.devtools.build.lib.bazel.bzlmod.BazelModuleResolutionFunction;
 import com.google.devtools.build.lib.bazel.bzlmod.ModuleFileFunction;
 import com.google.devtools.build.lib.bazel.bzlmod.RegistryFactory;
 import com.google.devtools.build.lib.bazel.bzlmod.RegistryFactoryImpl;
+import com.google.devtools.build.lib.bazel.bzlmod.RepoSpecFunction;
 import com.google.devtools.build.lib.bazel.bzlmod.YankedVersionsUtil;
 import com.google.devtools.build.lib.bazel.repository.RepositoryOptions;
 import com.google.devtools.build.lib.bazel.repository.cache.RepositoryCache;
@@ -51,6 +52,7 @@ import com.google.devtools.build.lib.vfs.SyscallCache;
 import com.google.devtools.build.skyframe.SkyFunction;
 import com.google.devtools.build.skyframe.SkyFunctionName;
 import com.google.errorprone.annotations.CanIgnoreReturnValue;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -112,8 +114,10 @@ public class BazelPackageLoader extends AbstractPackageLoader {
               RepositoryDelegatorFunction.FORCE_FETCH_CONFIGURE,
               RepositoryDelegatorFunction.FORCE_FETCH_DISABLED),
           PrecomputedValue.injected(RepositoryDelegatorFunction.VENDOR_DIRECTORY, Optional.empty()),
-          PrecomputedValue.injected(ModuleFileFunction.REGISTRIES, ImmutableList.of()),
+          PrecomputedValue.injected(
+              ModuleFileFunction.REGISTRIES, BazelRepositoryModule.DEFAULT_REGISTRIES),
           PrecomputedValue.injected(ModuleFileFunction.IGNORE_DEV_DEPS, false),
+          PrecomputedValue.injected(RepositoryDelegatorFunction.DISABLE_NATIVE_REPO_RULES, false),
           PrecomputedValue.injected(
               BazelModuleResolutionFunction.CHECK_DIRECT_DEPENDENCIES,
               RepositoryOptions.CheckDirectDepsMode.OFF),
@@ -136,7 +140,7 @@ public class BazelPackageLoader extends AbstractPackageLoader {
           new RegistryFactoryImpl(
               directories.getWorkspace(), downloadManager, Suppliers.ofInstance(ImmutableMap.of()));
 
-      // Allow tests to override SkyFunctions.MODULE_FILE to use fake registry
+      // Allow tests to override the following functions to use fake registry
       if (!this.extraSkyFunctions.containsKey(SkyFunctions.MODULE_FILE)) {
         addExtraSkyFunctions(
             ImmutableMap.of(
@@ -145,7 +149,16 @@ public class BazelPackageLoader extends AbstractPackageLoader {
                     ruleClassProvider.getBazelStarlarkEnvironment(),
                     registryFactory,
                     directories.getWorkspace(),
-                    ImmutableMap.of())));
+                    ModuleFileFunction.getBuiltinModules(directories.getEmbeddedBinariesRoot())
+                        .entrySet()
+                        .stream()
+                        .filter(e -> e.getKey().equals("bazel_tools"))
+                        .collect(
+                            ImmutableMap.toImmutableMap(Map.Entry::getKey, Map.Entry::getValue)))));
+      }
+      if (!this.extraSkyFunctions.containsKey(SkyFunctions.REPO_SPEC)) {
+        addExtraSkyFunctions(
+            ImmutableMap.of(SkyFunctions.REPO_SPEC, new RepoSpecFunction(registryFactory)));
       }
 
       addExtraSkyFunctions(

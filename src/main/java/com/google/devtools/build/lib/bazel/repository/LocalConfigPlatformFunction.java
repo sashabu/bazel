@@ -55,7 +55,8 @@ public class LocalConfigPlatformFunction extends RepositoryFunction {
       Environment env,
       Map<RepoRecordedInput, String> recordedInputValues,
       SkyKey key)
-      throws RepositoryFunctionException {
+      throws RepositoryFunctionException, InterruptedException {
+    ensureNativeRepoRuleEnabled(rule, env, "the platform defined at @platforms//host");
     String name = rule.getName();
     try {
       outputDirectory.createDirectoryAndParents();

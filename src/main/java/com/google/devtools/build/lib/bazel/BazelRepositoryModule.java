@@ -158,6 +158,7 @@ public class BazelRepositoryModule extends BlazeModule {
 
   private Optional<Path> vendorDirectory;
   private List<String> allowedYankedVersions = ImmutableList.of();
+  private boolean disableNativeRepoRules;
   private SingleExtensionEvalFunction singleExtensionEvalFunction;
   private final ExecutorService repoFetchingWorkerThreadPool =
       Executors.newFixedThreadPool(
@@ -343,6 +344,7 @@ public class BazelRepositoryModule extends BlazeModule {
       if (repoOptions.repositoryDownloaderRetries >= 0) {
         downloadManager.setRetries(repoOptions.repositoryDownloaderRetries);
       }
+      disableNativeRepoRules = repoOptions.disableNativeRepoRules;
 
       repositoryCache.setHardlink(repoOptions.useHardlinks);
       if (repoOptions.experimentalScaleTimeouts > 0.0) {
@@ -594,7 +596,9 @@ public class BazelRepositoryModule extends BlazeModule {
         PrecomputedValue.injected(RepositoryDelegatorFunction.IS_VENDOR_COMMAND, false),
         PrecomputedValue.injected(RepositoryDelegatorFunction.VENDOR_DIRECTORY, vendorDirectory),
         PrecomputedValue.injected(
-            YankedVersionsUtil.ALLOWED_YANKED_VERSIONS, allowedYankedVersions));
+            YankedVersionsUtil.ALLOWED_YANKED_VERSIONS, allowedYankedVersions),
+        PrecomputedValue.injected(
+            RepositoryDelegatorFunction.DISABLE_NATIVE_REPO_RULES, disableNativeRepoRules));
   }
 
   @Override
