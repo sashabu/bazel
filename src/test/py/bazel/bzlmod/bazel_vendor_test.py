@@ -539,18 +539,13 @@ class BazelVendorTest(test_base.TestBase):
 
     self.RunBazel(['vendor', '//:main', '--vendor_dir=vendor'])
 
-    # Clean and Assert running the target doesn't cause any repo fetch, but
-    # only symlinks, meaning it is using what is under /vendor directory
-    self.RunBazel(['clean', '--expunge'])
-    _, stdout, _ = self.RunBazel(['run', '//:main', '--vendor_dir=vendor'])
+    # Run the vendored target with --nofetch should only use what is under
+    # vendor to build, meaning we have vendored everything we need to build/run
+    # this target
+    _, stdout, _ = self.RunBazel(
+      ['run', '//:main', '--vendor_dir=vendor', '--nofetch']
+    )
     self.assertIn('Hello there! => aaa@1.0', stdout)
-
-    _, stdout, _ = self.RunBazel(['info', 'output_base'])
-    repo_path = stdout[0] + '/external/aaa~'
-    if self.IsWindows():
-      self.assertTrue(self.IsJunction(repo_path))
-    else:
-      self.assertTrue(os.path.islink(repo_path))
 
 
 if __name__ == '__main__':

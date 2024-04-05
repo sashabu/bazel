@@ -19,12 +19,14 @@ import static java.nio.charset.StandardCharsets.UTF_8;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
+import com.google.devtools.build.lib.analysis.ConfiguredTarget;
 import com.google.devtools.build.lib.analysis.NoBuildEvent;
 import com.google.devtools.build.lib.analysis.NoBuildRequestFinishedEvent;
 import com.google.devtools.build.lib.bazel.bzlmod.BazelFetchAllValue;
 import com.google.devtools.build.lib.bazel.commands.RepositoryFetcher.RepositoryFetcherException;
 import com.google.devtools.build.lib.bazel.commands.TargetFetcher.TargetFetcherException;
 import com.google.devtools.build.lib.bazel.repository.RepositoryOptions;
+import com.google.devtools.build.lib.buildtool.BuildResult;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.cmdline.LabelConstants;
 import com.google.devtools.build.lib.cmdline.LabelSyntaxException;
@@ -243,45 +245,27 @@ public final class VendorCommand implements BlazeCommand {
   private BlazeCommandResult vendorTargets(CommandEnvironment env, OptionsParsingResult options,
       List<String> targets, PathFragment vendorDirectory)
       throws InterruptedException, IOException {
-
-    //App#1: Call fetch which runs build to have the graph and configuration set
+    //Call fetch which runs build to have the targets graph and configuration set
+    BuildResult buildResult;
     try {
-      TargetFetcher.fetchTargets(env, options, targets);
+      buildResult = TargetFetcher.fetchTargets(env, options, targets);
     } catch (TargetFetcherException e) {
       return createFailedBlazeCommandResult(
           env.getReporter(), Code.QUERY_EVALUATION_ERROR, e.getMessage());
     }
 
-    Set<SkyKey> targetsSkyKeys = new HashSet<>();
-    for (String target : targets) {
+    //Traverse the graph created from build to collect repos and vendor them
+    InMemoryGraph inMemoryGraph = env.getSkyframeExecutor().getEvaluator().getInMemoryGraph();
+    ImmutableSet.Builder<RepositoryName> reposToVendor = ImmutableSet.builder();
+    for(ConfiguredTarget target : buildResult.getActualTargets()) {
       ConfiguredTargetKey targetKey =
           ConfiguredTargetKey.builder()
-              .setConfigurationKey(env.getSkyframeBuildView().getBuildConfiguration().getKey())
-              .setLabel(Label.parseCanonicalUnchecked(target))
+              .setConfigurationKey(target.getConfigurationKey())
+              .setLabel(target.getLabel())
               .build();
-      targetsSkyKeys.add(targetKey);
+      reposToVendor.addAll(collectReposFromThisTarget(inMemoryGraph, targetKey));
     }
 
-    //App#2: Call execute with the targets keys, but how to get configurationKeys?
-    // LoadingPhaseThreadsOption threadsOption = options.getOptions(LoadingPhaseThreadsOption.class);
-    // EvaluationContext evaluationContext =
-    //     EvaluationContext.newBuilder()
-    //         .setParallelism(threadsOption.threads)
-    //         .setEventHandler(env.getReporter())
-    //         .build();
-    // EvaluationResult<SkyValue> evaluationResult =
-    //     env.getSkyframeExecutor().prepareAndGet(targetsSkyKeys, evaluationContext);
-    // if (evaluationResult.hasError()) {
-    //   Exception e = evaluationResult.getError().getException();
-    //   return createFailedBlazeCommandResult(
-    //       env.getReporter(), "Unexpected error during evaluating targets: " + e.getMessage());
-    // }
-
-    InMemoryGraph inMemoryGraph = env.getSkyframeExecutor().getEvaluator().getInMemoryGraph();
-    ImmutableSet.Builder<RepositoryName> reposToVendor = ImmutableSet.builder();;
-    for(SkyKey key : targetsSkyKeys) {
-      reposToVendor.addAll(collectReposFromThisTarget(inMemoryGraph, key));
-    }
     vendor(env, vendorDirectory, reposToVendor.build().asList());
     return BlazeCommandResult.success();
   }
@@ -295,9 +279,7 @@ public final class VendorCommand implements BlazeCommand {
     while(!nodes.isEmpty()) {
       SkyKey key = nodes.remove();
       visited.add(key);
-
       NodeEntry nodeEntry = inMemoryGraph.get(null, Reason.OTHER, key);
-      //TODO node is null?
       if (nodeEntry.getValue() instanceof RepositoryDirectoryValue) {
         repos.add((RepositoryName) key.argument());
       }
