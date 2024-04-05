@@ -25,7 +25,9 @@ import com.google.devtools.build.lib.bazel.bzlmod.BazelFetchAllValue;
 import com.google.devtools.build.lib.bazel.commands.RepositoryFetcher.RepositoryFetcherException;
 import com.google.devtools.build.lib.bazel.commands.TargetFetcher.TargetFetcherException;
 import com.google.devtools.build.lib.bazel.repository.RepositoryOptions;
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.cmdline.LabelConstants;
+import com.google.devtools.build.lib.cmdline.LabelSyntaxException;
 import com.google.devtools.build.lib.cmdline.RepositoryName;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.Reporter;
@@ -44,6 +46,7 @@ import com.google.devtools.build.lib.runtime.commands.TestCommand;
 import com.google.devtools.build.lib.server.FailureDetails;
 import com.google.devtools.build.lib.server.FailureDetails.FailureDetail;
 import com.google.devtools.build.lib.server.FailureDetails.FetchCommand.Code;
+import com.google.devtools.build.lib.skyframe.ConfiguredTargetKey;
 import com.google.devtools.build.lib.skyframe.PrecomputedValue;
 import com.google.devtools.build.lib.skyframe.RepositoryMappingValue.RepositoryMappingResolutionException;
 import com.google.devtools.build.lib.util.DetailedExitCode;
@@ -54,15 +57,22 @@ import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.lib.vfs.Symlinks;
 import com.google.devtools.build.skyframe.EvaluationContext;
 import com.google.devtools.build.skyframe.EvaluationResult;
+import com.google.devtools.build.skyframe.InMemoryGraph;
+import com.google.devtools.build.skyframe.NodeEntry;
+import com.google.devtools.build.skyframe.QueryableGraph.Reason;
 import com.google.devtools.build.skyframe.SkyKey;
 import com.google.devtools.build.skyframe.SkyValue;
 import com.google.devtools.common.options.OptionsParser;
 import com.google.devtools.common.options.OptionsParsingResult;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map.Entry;
 import java.util.Objects;
+import java.util.Queue;
+import java.util.Set;
 import javax.annotation.Nullable;
 
 /** Fetches external repositories into a specified directory. */
@@ -93,7 +103,7 @@ public final class VendorCommand implements BlazeCommand {
   public void editOptions(OptionsParser optionsParser) {
     //We only need to inject these options with fetch target (when there is a residue)
     if (!optionsParser.getResidue().isEmpty()) {
-      TargetFetcher.injectOptionsToFetchTarget(optionsParser);
+      TargetFetcher.injectNoBuildOption(optionsParser);
     }
 
   }
@@ -230,28 +240,81 @@ public final class VendorCommand implements BlazeCommand {
     return BlazeCommandResult.success();
   }
 
-  private BlazeCommandResult vendorTargets(
-      CommandEnvironment env,
-      OptionsParsingResult options,
-      List<String> targets,
-      PathFragment vendorDirectory)
-      throws InterruptedException, IOException{
-    List<String> targetRepos;
+  private BlazeCommandResult vendorTargets(CommandEnvironment env, OptionsParsingResult options,
+      List<String> targets, PathFragment vendorDirectory)
+      throws InterruptedException, IOException {
+
+    //App#1: Call fetch which runs build to have the graph and configuration set
     try {
-      // This only collect transitive dependencies, not all what we need to build ex:toolchains
-      // TODO Try collecting repos via delegatorfunction events & vendor module?
-      targetRepos = TargetFetcher.fetchAndCollectTargetRepos(env, options, targets);
-      env.getReporter().handle(
-          Event.info("Target repos collected: " + targetRepos));
+      TargetFetcher.fetchTargets(env, options, targets);
     } catch (TargetFetcherException e) {
       return createFailedBlazeCommandResult(
           env.getReporter(), Code.QUERY_EVALUATION_ERROR, e.getMessage());
-    } catch (RepositoryMappingResolutionException e) {
-      return createFailedBlazeCommandResult(
-          env.getReporter(), e.getMessage(), e.getDetailedExitCode());
     }
 
-    return vendorRepos(env, options.getOptions(LoadingPhaseThreadsOption.class), targetRepos, vendorDirectory);
+    Set<SkyKey> targetsSkyKeys = new HashSet<>();
+    for (String target : targets) {
+      Label label;
+      try{
+        label = Label.parseCanonical(target);
+      } catch (LabelSyntaxException e) {
+        return createFailedBlazeCommandResult(
+            env.getReporter(), "Invalid target label for " + target + ": " + e.getMessage());
+      }
+      ConfiguredTargetKey targetKey =
+          ConfiguredTargetKey.builder()
+              .setConfigurationKey(env.getSkyframeBuildView().getBuildConfiguration().getKey())
+              .setLabel(label)
+              .build();
+      targetsSkyKeys.add(targetKey);
+    }
+
+    //App#2: Call execute with the targets keys, but how to get configurationKeys?
+    // LoadingPhaseThreadsOption threadsOption = options.getOptions(LoadingPhaseThreadsOption.class);
+    // EvaluationContext evaluationContext =
+    //     EvaluationContext.newBuilder()
+    //         .setParallelism(threadsOption.threads)
+    //         .setEventHandler(env.getReporter())
+    //         .build();
+    // EvaluationResult<SkyValue> evaluationResult =
+    //     env.getSkyframeExecutor().prepareAndGet(targetsSkyKeys, evaluationContext);
+    // if (evaluationResult.hasError()) {
+    //   Exception e = evaluationResult.getError().getException();
+    //   return createFailedBlazeCommandResult(
+    //       env.getReporter(), "Unexpected error during evaluating targets: " + e.getMessage());
+    // }
+
+    InMemoryGraph inMemoryGraph = env.getSkyframeExecutor().getEvaluator().getInMemoryGraph();
+    ImmutableSet.Builder<RepositoryName> reposToVendor = ImmutableSet.builder();;
+    for(SkyKey key : targetsSkyKeys) {
+      reposToVendor.addAll(collectReposFromThisTarget(inMemoryGraph, key));
+    }
+    vendor(env, vendorDirectory, reposToVendor.build().asList());
+    return BlazeCommandResult.success();
+  }
+
+  private Set<RepositoryName> collectReposFromThisTarget(InMemoryGraph inMemoryGraph,
+      SkyKey targetKey) throws InterruptedException {
+    ImmutableSet.Builder<RepositoryName> repos = ImmutableSet.builder();
+    Queue<SkyKey> nodes = new LinkedList<>();
+    Set<SkyKey> visited = new HashSet<>();
+    nodes.add(targetKey);
+    while(!nodes.isEmpty()) {
+      SkyKey key = nodes.remove();
+      visited.add(key);
+
+      NodeEntry nodeEntry = inMemoryGraph.get(null, Reason.OTHER, key);
+      //TODO node is null?
+      if (nodeEntry.getValue() instanceof RepositoryDirectoryValue) {
+        repos.add((RepositoryName) key.argument());
+      }
+      for(SkyKey depKey: nodeEntry.getDirectDeps()) {
+        if(!visited.contains(depKey)) {
+          nodes.add(depKey);
+        }
+      }
+    }
+    return repos.build();
   }
 
   /**
