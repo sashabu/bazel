@@ -27,15 +27,12 @@ import com.google.devtools.build.lib.bazel.commands.RepositoryFetcher.Repository
 import com.google.devtools.build.lib.bazel.commands.TargetFetcher.TargetFetcherException;
 import com.google.devtools.build.lib.bazel.repository.RepositoryOptions;
 import com.google.devtools.build.lib.buildtool.BuildResult;
-import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.cmdline.LabelConstants;
-import com.google.devtools.build.lib.cmdline.LabelSyntaxException;
 import com.google.devtools.build.lib.cmdline.RepositoryName;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.Reporter;
 import com.google.devtools.build.lib.packages.semantics.BuildLanguageOptions;
 import com.google.devtools.build.lib.pkgcache.PackageOptions;
-import com.google.devtools.build.lib.query2.cquery.CqueryOptions;
 import com.google.devtools.build.lib.rules.repository.RepositoryDelegatorFunction;
 import com.google.devtools.build.lib.rules.repository.RepositoryDirectoryValue;
 import com.google.devtools.build.lib.runtime.BlazeCommand;
@@ -84,7 +81,6 @@ import javax.annotation.Nullable;
     inherits = { TestCommand.class },
     options = {
         VendorOptions.class,
-        CqueryOptions.class,
         PackageOptions.class,
         KeepGoingOption.class,
         LoadingPhaseThreadsOption.class
